@@ -160,7 +160,6 @@
 <https://github.com/Rui-727/OTT#ui>
     a ui:X11UI ;
     lv2:optionalFeature ui:idleInterface ,
-                        ui:resize ,
                         ui:touch ;
     lv2:extensionData ui:idleInterface ,
                       ui:showInterface ;

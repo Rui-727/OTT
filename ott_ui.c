@@ -2,13 +2,20 @@
  *
  * URI: https://github.com/Rui-727/OTT#ui
  *
- * The UI is a 600 x 400 fixed-size X11 window drawn with Cairo. The visual
- * design echoes the Xfer Records OTT plugin: a dark gray panel with three
- * rows of knobs (top: global controls; middle: per-band THRESHOLD/GAIN for
- * HIGH/MID/LOW; bottom: UPWARD/DOWNWARD plus a bypass button). Each knob is
- * drawn as a modern rotary: outer ring with a colored value arc sweeping
- * 270 degrees, dark inner circle, and a white pointer. The window is
- * branded "OTT" / "by Zero:Archive" with credits to the original.
+ * The UI is a 580 x 440 fixed-size X11 window drawn with Cairo. The visual
+ * design matches the Xfer Records OTT plugin: a light gray panel with three
+ * rows of knobs (top: DEPTH/TIME/IN/OUT; middle: three horizontal gain
+ * reduction meters labeled H/B/L; bottom: per-band THRESH/GAIN for
+ * HIGH/MID/LOW) and an ACTIVE button centered at the bottom.
+ *
+ * Each knob is drawn as a flat white circle with a thin black outline and a
+ * black pointer line. No colored arc. The ACTIVE button is green when the
+ * plugin is processing audio and dark red when bypassed.
+ *
+ * The UPWARD and DOWNWARD ports exist in the DSP and TTL but are not exposed
+ * as widgets in this UI. They keep their default value (1.0 = full upward
+ * and downward compression) unless the host's generic parameter sheet is
+ * used to change them.
  *
  * The UI talks to the plugin exclusively through the LV2 UI callback
  * interface (write_function / port_event). It never shares memory with
@@ -18,7 +25,7 @@
  *   - Left-drag a knob vertically to change its value.
  *   - Shift+drag for fine control (5x slower).
  *   - Double-click a knob to reset it to its default.
- *   - Click the bypass button to toggle it.
+ *   - Click the ACTIVE button to toggle bypass.
  *
  * Build: see Makefile. Requires pugl-0, pugl-cairo-0, and cairo via
  * pkg-config. If pugl is missing the UI .so is skipped and the plugin
@@ -41,11 +48,13 @@
 #define OTT_URI "https://github.com/Rui-727/OTT"
 #define OTT_UI_URI OTT_URI "#ui"
 
-/* Window geometry. Fixed. Compact to match real Xfer OTT proportions. */
-#define OTT_UI_WIDTH  420
-#define OTT_UI_HEIGHT 400
+/* Window geometry. Fixed. Wide enough for 4 top knobs, 3 meter bars,
+ * 6 band knobs, and an ACTIVE button without any overlap. */
+#define OTT_UI_WIDTH  580
+#define OTT_UI_HEIGHT 440
 
-/* Port indices. Must match ott_lv2.c and ott.ttl. */
+/* Port indices. Must match ott_lv2.c and ott.ttl. UPWARD (2) and
+ * DOWNWARD (3) are valid ports but have no UI widget. */
 enum {
     OTT_PORT_DEPTH = 0,
     OTT_PORT_TIME,
@@ -72,12 +81,6 @@ typedef enum {
     W_TOGGLE
 } widget_type_t;
 
-/* Visual size class. Drives the knob radius and the label/value spacing. */
-typedef enum {
-    SIZE_LARGE,   /* top-row global knobs: 70px diameter (r=35)            */
-    SIZE_SMALL    /* per-band and bottom-row knobs: 50px diameter (r=25)   */
-} knob_size_t;
-
 /* Range descriptor for a parameter. min/max are in raw port units; for
  * W_TOGGLE both are 0/1 and the value is treated as a boolean. */
 typedef struct {
@@ -88,7 +91,6 @@ typedef struct {
 
 typedef struct {
     widget_type_t  type;
-    knob_size_t    size;       /* W_KNOB only                                    */
     uint32_t       port;       /* LV2 control port index                 */
     const char    *label;      /* short label drawn below the widget     */
     /* Geometry: knob uses (cx, cy, r); toggle uses (x, y, w, h).        */
@@ -99,7 +101,9 @@ typedef struct {
     float          value;      /* cached raw port value (last port_event)*/
 } ott_widget_t;
 
-#define OTT_WIDGET_COUNT 13
+/* 4 top knobs + 6 band knobs + 1 bypass toggle = 11 widgets.
+ * UPWARD (port 2) and DOWNWARD (port 3) have no widget. */
+#define OTT_WIDGET_COUNT 11
 
 /* ------------------------------------------------------------------ */
 /* UI state                                                            */
@@ -135,24 +139,33 @@ typedef struct {
 /* Theme                                                               */
 /* ------------------------------------------------------------------ */
 
-/* OTT light theme matching the real Xfer OTT: light gray background,
- * white knobs with black outlines, black text. */
-#define C_BG          0.820, 0.820, 0.820   /* #D1D1D1 light gray bg      */
-#define C_KNOB_OUTER  0.910, 0.910, 0.910   /* #E8E8E8 white knob body    */
-#define C_KNOB_INNER  0.780, 0.780, 0.780   /* #C7C7C7 knob center        */
-#define C_ARC_ACTIVE  0.200, 0.200, 0.200   /* #333333 dark active arc    */
-#define C_ARC_TRACK   0.600, 0.600, 0.600   /* #999999 light track        */
-#define C_POINTER     0.100, 0.100, 0.100   /* #1A1A1A black pointer      */
-#define C_LABEL       0.150, 0.150, 0.150   /* #262626 knob labels        */
-#define C_VALUE       0.350, 0.350, 0.350   /* #595959 value text         */
-#define C_BAND        0.200, 0.200, 0.200   /* #333333 band labels        */
-#define C_SEP         0.500, 0.500, 0.500   /* #808080 separator lines    */
-#define C_TITLE       0.100, 0.100, 0.100   /* near-black title           */
-#define C_SUBTITLE    0.400, 0.400, 0.400   /* dim subtitle               */
-#define C_CREDITS     0.450, 0.450, 0.450   /* credits                    */
-#define C_BYPASS_ON   0.000, 0.667, 0.000   /* #00AA00 green (ACTIVE)     */
-#define C_BYPASS_OFF  0.267, 0.000, 0.000   /* #440000 dark red (BYPASS)  */
-#define C_BUTTON_TEXT 1.000, 1.000, 1.000   /* white button text          */
+/* Light theme matching the real Xfer OTT: light gray background, white
+ * knobs with thin black outlines and black pointers, dark green meter
+ * panel with cyan active segments. */
+#define C_BG            0.878, 0.878, 0.878   /* #E0E0E0 light gray bg    */
+#define C_KNOB_BODY     0.945, 0.945, 0.945   /* #F1F1F1 white knob body  */
+#define C_KNOB_OUTLINE  0.000, 0.000, 0.000   /* #000000 black outline    */
+#define C_POINTER       0.000, 0.000, 0.000   /* #000000 black pointer    */
+#define C_LABEL         0.080, 0.080, 0.080   /* #141414 knob labels      */
+#define C_VALUE         0.300, 0.300, 0.300   /* #4D4D4D value text       */
+#define C_BAND          0.080, 0.080, 0.080   /* #141414 band labels      */
+#define C_SEP           0.550, 0.550, 0.550   /* #8C8C8C separator lines  */
+#define C_TITLE         0.000, 0.000, 0.000   /* #000000 title            */
+#define C_SUBTITLE      0.400, 0.400, 0.400   /* #666666 subtitle         */
+#define C_CREDITS       0.400, 0.400, 0.400   /* #666666 credits          */
+#define C_METER_PANEL   0.000, 0.200, 0.000   /* #003300 dark green panel */
+#define C_METER_TRACK   0.067, 0.133, 0.067   /* #112211 darker track     */
+#define C_METER_ACTIVE  0.000, 0.804, 0.816   /* #00CDCD cyan active      */
+#define C_METER_TEXT    1.000, 1.000, 1.000   /* #FFFFFF white meter text */
+#define C_BYPASS_ON     0.000, 0.667, 0.000   /* #00AA00 green (ACTIVE)   */
+#define C_BYPASS_OFF    0.400, 0.000, 0.000   /* #660000 dark red (BYPASS)*/
+#define C_BUTTON_TEXT   1.000, 1.000, 1.000   /* #FFFFFF white button text*/
+
+/* Knob radii. Top row uses larger knobs (r=28, 56px diameter); the band
+ * row uses smaller ones (r=22, 44px diameter). These match the visual
+ * proportions of the real Xfer OTT. */
+#define R_TOP   28.0
+#define R_BAND  22.0
 
 /* ------------------------------------------------------------------ */
 /* Parameter helpers                                                   */
@@ -238,51 +251,45 @@ ui_touch(ott_ui_t *ui, uint32_t port, bool grabbed)
 /* Widget table and hit testing                                        */
 /* ------------------------------------------------------------------ */
 
-/* Knob radius by size class. SIZE_LARGE = 70px diameter (r=35),
- * SIZE_SMALL = 50px diameter (r=25). */
-static double
-knob_radius(knob_size_t s)
-{
-    return s == SIZE_LARGE ? 28.0 : 20.0;
-}
-
 static void
 init_widgets(ott_ui_t *ui)
 {
-    #define KNOB(SZ, p, lbl, X, Y, MIN, MAX, DEF) \
+    #define KNOB(p, lbl, X, Y, R, MIN, MAX, DEF) \
         ui->widgets[ui_count++] = (ott_widget_t){ \
-            W_KNOB, (SZ), (p), (lbl), (X), (Y), knob_radius(SZ), 0,0,0,0, \
+            W_KNOB, (p), (lbl), (X), (Y), (R), 0,0,0,0, \
             { (MIN), (MAX), (DEF) }, (DEF) }
     #define TOGGLE(p, lbl, X, Y, W, H, DEF) \
         ui->widgets[ui_count++] = (ott_widget_t){ \
-            W_TOGGLE, SIZE_SMALL, (p), (lbl), 0,0,0, (X), (Y), (W), (H), \
+            W_TOGGLE, (p), (lbl), 0,0,0, (X), (Y), (W), (H), \
             { 0.0f, 1.0f, (DEF) }, (DEF) }
 
     int ui_count = 0;
 
-    /* Top row: 4 knobs. 420px / 4 = 105px per slot, centers at 52,157,262,367.
-     * Use SIZE_SMALL (r=22) for a compact look. cy=55. */
-    KNOB(SIZE_SMALL, OTT_PORT_DEPTH,       "DEPTH",    52.0,  55.0, 0.0f, 1.0f, 1.0f);
-    KNOB(SIZE_SMALL, OTT_PORT_TIME,        "TIME",    157.0,  55.0, 0.0f, 1.0f, 0.5f);
-    KNOB(SIZE_SMALL, OTT_PORT_INPUT_GAIN,  "IN",      262.0,  55.0, -24.0f, 24.0f, 5.2f);
-    KNOB(SIZE_SMALL, OTT_PORT_OUTPUT_GAIN, "OUT",     367.0,  55.0, -24.0f, 24.0f, 0.0f);
+    /* Top row: 4 knobs at y=85, r=R_TOP (28). Centers x=80,220,360,500.
+     * 580px wide; first/last centers are 80 and 500, leaving 52px margins
+     * on each side (80-28=52, 580-500-28=52). Spacing 140px. */
+    KNOB(OTT_PORT_DEPTH,       "DEPTH",  80.0, 85.0, R_TOP, 0.0f, 1.0f, 1.0f);
+    KNOB(OTT_PORT_TIME,        "TIME",  220.0, 85.0, R_TOP, 0.0f, 1.0f, 0.5f);
+    KNOB(OTT_PORT_INPUT_GAIN,  "IN",    360.0, 85.0, R_TOP, -24.0f, 24.0f, 5.2f);
+    KNOB(OTT_PORT_OUTPUT_GAIN, "OUT",   500.0, 85.0, R_TOP, -24.0f, 24.0f, 0.0f);
 
-    /* Bottom: 3 columns of THRESH+GAIN. 420px / 3 = 140px per column.
-     * Centers at 70, 210, 350. Two knobs per column, offset +/- 30.
-     * cy=330. SIZE_SMALL (r=22). */
-    KNOB(SIZE_SMALL, OTT_PORT_BAND3_THRESH, "THRESH",  40.0, 330.0, -60.0f, 0.0f, -30.0f);
-    KNOB(SIZE_SMALL, OTT_PORT_BAND3_GAIN,   "GAIN",   100.0, 330.0, -24.0f, 24.0f, 10.3f);
-    KNOB(SIZE_SMALL, OTT_PORT_BAND2_THRESH, "THRESH", 180.0, 330.0, -60.0f, 0.0f, -30.0f);
-    KNOB(SIZE_SMALL, OTT_PORT_BAND2_GAIN,   "GAIN",   240.0, 330.0, -24.0f, 24.0f,  5.7f);
-    KNOB(SIZE_SMALL, OTT_PORT_BAND1_THRESH, "THRESH", 320.0, 330.0, -60.0f, 0.0f, -30.0f);
-    KNOB(SIZE_SMALL, OTT_PORT_BAND1_GAIN,   "GAIN",   380.0, 330.0, -24.0f, 24.0f, 10.3f);
+    /* Bottom row: 6 band knobs at y=335, r=R_BAND (22).
+     * Three pairs centered at x=80 (HIGH), 290 (MID), 500 (LOW).
+     * Within each pair THRESH is 30px left of center, GAIN 30px right.
+     * Band port mapping (per ott_dsp.h):
+     *   BAND3 = HIGH, BAND2 = MID, BAND1 = LOW. */
+    KNOB(OTT_PORT_BAND3_THRESH, "THRESH",  50.0, 335.0, R_BAND, -60.0f, 0.0f, -30.0f);
+    KNOB(OTT_PORT_BAND3_GAIN,   "GAIN",   110.0, 335.0, R_BAND, -24.0f, 24.0f, 10.3f);
+    KNOB(OTT_PORT_BAND2_THRESH, "THRESH", 260.0, 335.0, R_BAND, -60.0f, 0.0f, -30.0f);
+    KNOB(OTT_PORT_BAND2_GAIN,   "GAIN",   320.0, 335.0, R_BAND, -24.0f, 24.0f,  5.7f);
+    KNOB(OTT_PORT_BAND1_THRESH, "THRESH", 470.0, 335.0, R_BAND, -60.0f, 0.0f, -30.0f);
+    KNOB(OTT_PORT_BAND1_GAIN,   "GAIN",   530.0, 335.0, R_BAND, -24.0f, 24.0f, 10.3f);
 
-    /* UP/DOWN as small knobs in the meter area, right side. */
-    KNOB(SIZE_SMALL, OTT_PORT_UPWARD,   "UP",     370.0, 150.0, 0.0f, 1.0f, 1.0f);
-    KNOB(SIZE_SMALL, OTT_PORT_DOWNWARD, "DOWN",   370.0, 220.0, 0.0f, 1.0f, 1.0f);
-
-    /* Bypass button at bottom center, below the band knobs. */
-    TOGGLE(OTT_PORT_BYPASS,  "BYPASS",   165.0, 375.0, 90.0, 20.0, 0.0f);
+    /* ACTIVE button centered below the MID band column. Window center x
+     * is 290, button is 90 wide so x=245. y=398 puts the top of the
+     * button 13px below the value text of the band knobs (which sits at
+     * y=335+22+28=385, with a few px of descender below). */
+    TOGGLE(OTT_PORT_BYPASS, "ACTIVE", 245.0, 398.0, 90.0, 22.0, 0.0f);
 
     (void)ui_count;
     #undef KNOB
@@ -350,10 +357,10 @@ rounded_rect(cairo_t *cr, double x, double y, double w, double h, double r)
     cairo_close_path(cr);
 }
 
-/* Draw a modern rotary knob. The arc sweeps 270 degrees from 7 o'clock
- * (minimum) clockwise to 5 o'clock (maximum). The active portion is
- * warm orange, the inactive portion is dark gray. A dark inner circle
- * creates the ring look, and a white pointer indicates the value. */
+/* Draw a flat knob matching the real Xfer OTT style: filled white circle,
+ * thin black outline, black pointer line from near the center to near the
+ * edge. No colored arc. The pointer sweeps 270 degrees from the 7 o'clock
+ * position (minimum) clockwise to the 5 o'clock position (maximum). */
 static void
 draw_knob(cairo_t *cr, const ott_widget_t *w)
 {
@@ -362,56 +369,33 @@ draw_knob(cairo_t *cr, const ott_widget_t *w)
     const double r  = w->r;
     const double v  = param_normalize(w, w->value);
 
-    /* Arc sweep: 270 degrees, from 135 deg (bottom-left, "7 o'clock") to
-     * 405 deg (bottom-right, "5 o'clock"), going clockwise over the top.
-     * Cairo angles are radians with Y growing down, so positive angles
-     * go clockwise on screen; start=3pi/4 places us at lower-left.    */
+    /* Pointer angle. The arc sweeps 270 degrees, from 135 deg (bottom-left,
+     * "7 o'clock") clockwise to 405 deg (bottom-right, "5 o'clock"). Cairo
+     * angles are radians with Y growing down, so positive angles go
+     * clockwise on screen; start=3pi/4 places us at lower-left. */
     const double start = 0.75 * M_PI;     /* 135 deg, bottom-left        */
     const double end   = 2.25 * M_PI;     /* 405 deg, bottom-right       */
     const double sweep = end - start;     /* 1.5pi = 270 deg             */
     const double angle = start + v * sweep;
 
-    /* 1. Outer filled circle (knob body, #3A3A3A). */
-    set_rgb(cr, C_KNOB_OUTER);
+    /* 1. Knob body: filled white/cream circle. */
+    set_rgb(cr, C_KNOB_BODY);
     cairo_arc(cr, cx, cy, r, 0.0, 2.0 * M_PI);
     cairo_fill(cr);
 
-    /* 2. Value arc ring around the outer edge. We draw at radius r - 3
-     * with a 4px line so the ring sits just inside the knob outline.
-     * Inactive (full sweep) first, then active portion on top. */
-    const double arc_r = r - 3.0;
-    if (arc_r > 2.0) {
-        /* Track (inactive portion: from current angle to end). */
-        set_rgb(cr, C_ARC_TRACK);
-        cairo_set_line_width(cr, 4.0);
-        cairo_set_line_cap(cr, CAIRO_LINE_CAP_BUTT);
-        cairo_arc(cr, cx, cy, arc_r, start, end);
-        cairo_stroke(cr);
+    /* 2. Thin black outline. */
+    set_rgb(cr, C_KNOB_OUTLINE);
+    cairo_set_line_width(cr, 1.5);
+    cairo_arc(cr, cx, cy, r, 0.0, 2.0 * M_PI);
+    cairo_stroke(cr);
 
-        /* Active portion: from start to current angle. */
-        if (v > 0.001) {
-            set_rgb(cr, C_ARC_ACTIVE);
-            cairo_set_line_width(cr, 4.0);
-            cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-            cairo_arc(cr, cx, cy, arc_r, start, angle);
-            cairo_stroke(cr);
-        }
-    }
-
-    /* 3. Inner filled circle (60% of outer diameter -> radius 0.6 * r),
-     * darker gray (#222) to create the "ring" look against the knob body. */
-    const double inner_r = 0.6 * r;
-    set_rgb(cr, C_KNOB_INNER);
-    cairo_arc(cr, cx, cy, inner_r, 0.0, 2.0 * M_PI);
-    cairo_fill(cr);
-
-    /* 4. Pointer / indicator: white line from the inner circle's edge to
-     * the inner edge of the arc ring, pointing at the current value. 2px. */
+    /* 3. Pointer: black line from 20% of radius out to 85% of radius,
+     * pointing at the current value. 2px thick with round caps. */
     set_rgb(cr, C_POINTER);
     cairo_set_line_width(cr, 2.0);
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-    const double p_inner = inner_r * 0.45;        /* start near center    */
-    const double p_outer = arc_r - 2.0;            /* stop just inside arc */
+    const double p_inner = r * 0.20;
+    const double p_outer = r * 0.85;
     cairo_move_to(cr,
                   cx + p_inner * cos(angle),
                   cy + p_inner * sin(angle));
@@ -423,12 +407,12 @@ draw_knob(cairo_t *cr, const ott_widget_t *w)
     /* Reset line cap for any subsequent draws. */
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_BUTT);
 
-    /* 5. Label below the knob (#DDDDDD, 10pt). */
+    /* 4. Label below the knob. */
     set_rgb(cr, C_LABEL);
     cairo_set_font_size(cr, 10.0);
     show_text_centered(cr, cx, cy + r + 15.0, w->label);
 
-    /* 6. Value text below the label (#888888, 9pt). */
+    /* 5. Value text below the label. */
     char buf[32];
     format_value(buf, sizeof(buf), w, w->value);
     set_rgb(cr, C_VALUE);
@@ -436,15 +420,13 @@ draw_knob(cairo_t *cr, const ott_widget_t *w)
     show_text_centered(cr, cx, cy + r + 28.0, buf);
 }
 
-/* Draw the bypass button as a rounded rectangle. Green ("ACTIVE") when
+/* Draw the ACTIVE button as a rounded rectangle. Green ("ACTIVE") when
  * the plugin is processing audio (bypass port == 0); dark red ("BYPASS")
- * when the signal is bypassed (bypass port == 1). */
+ * when the signal is bypassed (bypass port == 1). The button text shows
+ * the *current state*. */
 static void
 draw_toggle(cairo_t *cr, const ott_widget_t *w)
 {
-    /* In OTT's convention: bypass value 0 means the plugin is ACTIVE
-     * (audio is processed), value 1 means BYPASS (audio is passed through).
-     * The button text reflects the *current state*, not the action. */
     const bool bypassed = w->value > 0.5f;
 
     if (bypassed) {
@@ -455,23 +437,24 @@ draw_toggle(cairo_t *cr, const ott_widget_t *w)
     rounded_rect(cr, w->x, w->y, w->w, w->h, 5.0);
     cairo_fill(cr);
 
-    /* Thin darker border to lift the button off the panel. */
+    /* Thin black border. */
     set_rgb(cr, 0.0, 0.0, 0.0);
     cairo_set_line_width(cr, 1.0);
     rounded_rect(cr, w->x + 0.5, w->y + 0.5, w->w - 1.0, w->h - 1.0, 4.5);
     cairo_stroke(cr);
 
-    /* Button label inside. */
+    /* Button text inside. */
     set_rgb(cr, C_BUTTON_TEXT);
+    cairo_select_font_face(cr, "sans-serif",
+                           CAIRO_FONT_SLANT_NORMAL,
+                           CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size(cr, 11.0);
     show_text_centered(cr, w->x + w->w / 2.0,
                        w->y + w->h / 2.0 + 4.0,
                        bypassed ? "BYPASS" : "ACTIVE");
-
-    /* Caption above the button. */
-    set_rgb(cr, C_LABEL);
-    cairo_set_font_size(cr, 10.0);
-    show_text_centered(cr, w->x + w->w / 2.0, w->y - 6.0, w->label);
+    cairo_select_font_face(cr, "sans-serif",
+                           CAIRO_FONT_SLANT_NORMAL,
+                           CAIRO_FONT_WEIGHT_NORMAL);
 }
 
 static void
@@ -482,18 +465,18 @@ draw_band_label(cairo_t *cr, double cx, double y, const char *s)
     show_text_centered(cr, cx, y, s);
 }
 
-/* Draw the top-left header: "OTT" in bold white, "by Zero:Archive" in a
+/* Draw the top-left header: "OTT" in bold black, "by Zero:Archive" in a
  * smaller dim subtitle below. */
 static void
 draw_header(cairo_t *cr)
 {
-    /* "OTT" title, bold, 16pt. */
+    /* "OTT" title, bold, 14pt. */
     set_rgb(cr, C_TITLE);
     cairo_select_font_face(cr, "sans-serif",
                            CAIRO_FONT_SLANT_NORMAL,
                            CAIRO_FONT_WEIGHT_BOLD);
-    cairo_set_font_size(cr, 16.0);
-    cairo_move_to(cr, 16.0, 20.0);
+    cairo_set_font_size(cr, 14.0);
+    cairo_move_to(cr, 12.0, 20.0);
     cairo_show_text(cr, "OTT");
 
     /* "by Zero:Archive" subtitle, normal weight, 9pt, dim. */
@@ -502,8 +485,69 @@ draw_header(cairo_t *cr)
                            CAIRO_FONT_SLANT_NORMAL,
                            CAIRO_FONT_WEIGHT_NORMAL);
     cairo_set_font_size(cr, 9.0);
-    cairo_move_to(cr, 16.0, 32.0);
+    cairo_move_to(cr, 12.0, 33.0);
     cairo_show_text(cr, "by Zero:Archive");
+}
+
+/* Draw a 1px horizontal separator line at the given y. The .5 offset
+ * keeps the line crisp on integer-pixel boundaries. */
+static void
+draw_separator(cairo_t *cr, double y)
+{
+    set_rgb(cr, C_SEP);
+    cairo_set_line_width(cr, 1.0);
+    cairo_move_to(cr, 0.0, y);
+    cairo_line_to(cr, (double)OTT_UI_WIDTH, y);
+    cairo_stroke(cr);
+}
+
+/* Draw the 3-band meter panel. Three horizontal bars labeled H, B, L.
+ * The meters are currently static (showing 0.0 dB / half deflection)
+ * because the DSP does not expose meter data through LV2 ports. The
+ * panel still serves as a visual anchor matching the real OTT layout. */
+static void
+draw_meters(cairo_t *cr)
+{
+    /* Dark green panel. */
+    set_rgb(cr, C_METER_PANEL);
+    cairo_rectangle(cr, 8.0, 160.0, (double)OTT_UI_WIDTH - 16.0, 120.0);
+    cairo_fill(cr);
+
+    /* Three horizontal meters at y=178, 218, 258 (centers, 40px apart).
+     * Each meter: label at x=16, track x=30..510 (480px wide), value
+     * text at x=520. */
+    const char *m_labels[3] = {"H", "B", "L"};
+    for (int m = 0; m < 3; m++) {
+        const double my = 178.0 + m * 40.0;
+
+        /* Label. */
+        set_rgb(cr, C_METER_TEXT);
+        cairo_select_font_face(cr, "sans-serif",
+                               CAIRO_FONT_SLANT_NORMAL,
+                               CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, 11.0);
+        cairo_move_to(cr, 16.0, my + 4.0);
+        cairo_show_text(cr, m_labels[m]);
+
+        /* Inactive track (full width, dark). */
+        set_rgb(cr, C_METER_TRACK);
+        cairo_rectangle(cr, 30.0, my - 6.0, 480.0, 12.0);
+        cairo_fill(cr);
+
+        /* Active portion (static at 50% to indicate neutral 0 dB). */
+        set_rgb(cr, C_METER_ACTIVE);
+        cairo_rectangle(cr, 30.0, my - 6.0, 240.0, 12.0);
+        cairo_fill(cr);
+
+        /* Value text at right of meter. */
+        set_rgb(cr, C_METER_TEXT);
+        cairo_select_font_face(cr, "sans-serif",
+                               CAIRO_FONT_SLANT_NORMAL,
+                               CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 9.0);
+        cairo_move_to(cr, 520.0, my + 3.0);
+        cairo_show_text(cr, "+0.0");
+    }
 }
 
 static void
@@ -517,6 +561,11 @@ on_expose(ott_ui_t *ui, const PuglExposeEvent *event)
     set_rgb(cr, C_BG);
     cairo_paint(cr);
 
+    /* Default font for everything that doesn't override. */
+    cairo_select_font_face(cr, "sans-serif",
+                           CAIRO_FONT_SLANT_NORMAL,
+                           CAIRO_FONT_WEIGHT_NORMAL);
+
     /* Header. */
     draw_header(cr);
     cairo_select_font_face(cr, "sans-serif",
@@ -524,69 +573,28 @@ on_expose(ott_ui_t *ui, const PuglExposeEvent *event)
                            CAIRO_FONT_WEIGHT_NORMAL);
 
     /* Separator below header. */
-    set_rgb(cr, C_SEP);
-    cairo_set_line_width(cr, 1.0);
-    cairo_move_to(cr, 0.0, 100.5);
-    cairo_line_to(cr, (double)OTT_UI_WIDTH, 100.5);
-    cairo_stroke(cr);
+    draw_separator(cr, 46.5);
 
-    /* Meter section: dark green, 3 horizontal meters.
-     * Compact: y=110 to y=270, width fills most of window.
-     * UP/DOWN knobs sit in the right portion of this area. */
-    set_rgb(cr, 0.102, 0.227, 0.102);
-    cairo_rectangle(cr, 8.0, 108.0, (double)OTT_UI_WIDTH - 16.0, 165.0);
-    cairo_fill(cr);
+    /* Top knobs (drawn after separators so they sit on top). */
 
-    /* Meter labels and bars. */
-    cairo_select_font_face(cr, "sans-serif",
-                           CAIRO_FONT_SLANT_NORMAL,
-                           CAIRO_FONT_WEIGHT_BOLD);
-    cairo_set_font_size(cr, 10.0);
-    set_rgb(cr, 1.0, 1.0, 1.0);
-    const char *m_labels[3] = {"H", "B", "L"};
-    for (int m = 0; m < 3; m++) {
-        double my = 130.0 + m * 45.0;
-        /* Label */
-        set_rgb(cr, 1.0, 1.0, 1.0);
-        cairo_move_to(cr, 16.0, my + 4.0);
-        cairo_show_text(cr, m_labels[m]);
-        /* Inactive track */
-        set_rgb(cr, 0.067, 0.133, 0.067);
-        cairo_rectangle(cr, 30.0, my - 6.0, 300.0, 12.0);
-        cairo_fill(cr);
-        /* Active portion (static) */
-        set_rgb(cr, 0.0, 0.804, 0.816);
-        cairo_rectangle(cr, 30.0, my - 6.0, 150.0, 12.0);
-        cairo_fill(cr);
-        /* Value */
-        set_rgb(cr, 1.0, 1.0, 1.0);
-        cairo_select_font_face(cr, "sans-serif",
-                               CAIRO_FONT_SLANT_NORMAL,
-                               CAIRO_FONT_WEIGHT_NORMAL);
-        cairo_set_font_size(cr, 9.0);
-        char valbuf[16];
-        snprintf(valbuf, sizeof(valbuf), "%+.1f", 0.0f);
-        cairo_move_to(cr, 338.0, my + 3.0);
-        cairo_show_text(cr, valbuf);
-        cairo_select_font_face(cr, "sans-serif",
-                               CAIRO_FONT_SLANT_NORMAL,
-                               CAIRO_FONT_WEIGHT_BOLD);
-        cairo_set_font_size(cr, 10.0);
-    }
+    /* Separator below top knobs.
+     * Top knob cy=85, r=28, label at y=128, value at y=141. The value
+     * text descender reaches about y=148, so put the separator at 152.5. */
+    draw_separator(cr, 152.5);
 
-    /* Separator below meter section. */
-    set_rgb(cr, C_SEP);
-    cairo_set_line_width(cr, 1.0);
-    cairo_move_to(cr, 0.0, 280.5);
-    cairo_line_to(cr, (double)OTT_UI_WIDTH, 280.5);
-    cairo_stroke(cr);
+    /* Meter section. */
+    draw_meters(cr);
+
+    /* Separator below meters.
+     * Meter panel ends at y=280. */
+    draw_separator(cr, 288.5);
 
     /* Band column labels. */
-    draw_band_label(cr, 70.0, 295.0, "HIGH");
-    draw_band_label(cr, 210.0, 295.0, "MID");
-    draw_band_label(cr, 350.0, 295.0, "LOW");
+    draw_band_label(cr,  80.0, 302.0, "HIGH");
+    draw_band_label(cr, 290.0, 302.0, "MID");
+    draw_band_label(cr, 500.0, 302.0, "LOW");
 
-    /* Widgets. */
+    /* Widgets (knobs and the ACTIVE button). */
     for (int i = 0; i < OTT_WIDGET_COUNT; ++i) {
         const ott_widget_t *w = &ui->widgets[i];
         if (w->type == W_KNOB) {
@@ -596,7 +604,7 @@ on_expose(ott_ui_t *ui, const PuglExposeEvent *event)
         }
     }
 
-    /* Credits footer. */
+    /* Credits footer at the bottom. */
     set_rgb(cr, C_CREDITS);
     cairo_select_font_face(cr, "sans-serif",
                            CAIRO_FONT_SLANT_NORMAL,
@@ -760,6 +768,9 @@ instantiate(const LV2UI_Descriptor *descriptor,
     }
 
     puglSetViewString(ui->view, PUGL_WINDOW_TITLE, "OTT - by Zero:Archive");
+    /* Fixed size: not resizable, and min=max=default so the host cannot
+     * grow or shrink the window. The TTL also declares ui:fixedSize true
+     * and does NOT declare ui:resize as an optional feature. */
     puglSetViewHint(ui->view, PUGL_RESIZABLE, PUGL_FALSE);
     puglSetSizeHint(ui->view, PUGL_DEFAULT_SIZE, OTT_UI_WIDTH, OTT_UI_HEIGHT);
     puglSetSizeHint(ui->view, PUGL_MIN_SIZE, OTT_UI_WIDTH, OTT_UI_HEIGHT);
@@ -826,7 +837,7 @@ port_event(LV2UI_Handle handle,
     if (port_index >= OTT_PORT_CONTROL_COUNT) return;
 
     ott_widget_t *w = widget_by_port(ui, port_index);
-    if (!w) return;
+    if (!w) return;  /* port has no widget (e.g. UPWARD, DOWNWARD) */
 
     float v = *(const float *)buffer;
     if (v == w->value) return;  /* short-circuit redundant updates */

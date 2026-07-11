@@ -66,10 +66,19 @@ ninja -C build install
 Then point `PKG_CONFIG_PATH` at the install prefix if you used a non-system
 one (for example `PKG_CONFIG_PATH=/home/you/local/lib/x86_64-linux-gnu/pkgconfig make`).
 
-The UI declares itself as `ui:X11UI`. Hosts that support X11 embedding
-(Ardour, Carla, Jalv, Qtractor, Zrythm, REAPER) will embed it directly;
-hosts that cannot embed fall back to the `ui:showInterface` to open the UI
-in its own top-level window.
+The UI declares itself as `ui:X11UI` with `ui:fixedSize true`. Hosts that
+support X11 embedding (Ardour, Carla, Jalv, Qtractor, Zrythm, REAPER) will
+embed it directly; hosts that cannot embed fall back to the
+`ui:showInterface` to open the UI in its own top-level window.
+
+The UI is a fixed 580 x 440 pixel window with three rows of controls:
+DEPTH, TIME, IN, OUT across the top; three gain-reduction meters (H, B, L)
+in the middle; and per-band THRESH / GAIN pairs for HIGH, MID, LOW across
+the bottom, with an ACTIVE button centered below. Knobs are flat white
+circles with black outlines and black pointers, matching the Xfer OTT
+visual. The `upward` and `downward` ports are not exposed as widgets:
+they keep their default value (1.0) and can be adjusted through the
+host's generic parameter sheet if needed.
 
 ## Test
 
