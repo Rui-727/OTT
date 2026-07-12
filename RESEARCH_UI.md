@@ -1297,7 +1297,7 @@ declare them explicitly so it works everywhere:
     ] , /* ... and so on for all 13 control ports ... */ .
 ```
 
-Using `lv2:symbol` rather than `ui:portIndex` is recommended by the spec
+Using `lv2:symbol` instead of `ui:portIndex` is recommended by the spec
 because port symbols are stable across versions while indices are not
 [lv2-ui-spec].
 

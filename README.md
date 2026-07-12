@@ -24,15 +24,52 @@ either.
 ## Build
 
 Requirements: a C compiler (`cc` or `gcc`) and `make`. No external libraries
-are needed. The LV2 host headers are not required: a minimal `lv2/lv2.h` is
-bundled with the source. If your system has `lv2-dev` installed, the wrapper
-still works (the bundled header is sufficient and self-contained).
+are needed for the plugin itself. The LV2 host headers are not required: a
+minimal `lv2/lv2.h` (and `lv2/ui.h` for the UI) is bundled with the source.
+If your system has `lv2-dev` installed, the wrapper still works (the bundled
+headers are sufficient and self-contained).
 
 ```
 make
 ```
 
-This produces `ott.lv2/ott.so`, the shared library for the plugin bundle.
+This produces `ott.lv2/ott.so` (the plugin) and, when pugl and Cairo are
+available, `ott.lv2/ott_ui.so` (the graphical UI).
+
+### Graphical UI (optional)
+
+The UI is built with pugl and Cairo. The Makefile probes for pugl via
+`pkg-config --exists pugl-0 pugl-cairo-0 cairo` and only builds the UI when
+all three are found. If they are missing, the plugin still builds and works
+with the host's generic parameter sheet.
+
+Install the dependencies on common distros:
+
+- Debian/Ubuntu: `apt install libpugl-dev libcairo2-dev` (note: the Debian
+  `libpugl-dev` package ships the old OpenGL-only pugl API, so for the Cairo
+  backend you may need to build pugl from source, see below).
+- Arch: `pacman -S pugl cairo`.
+- Fedora: `dnf install pugl-devel cairo-devel`.
+
+If your distro's `libpugl-dev` is too old (pre-0.5) or missing the Cairo
+backend, build pugl from git:
+
+```
+git clone https://github.com/lv2/pugl.git /tmp/pugl
+cd /tmp/pugl
+meson setup build --prefix=/usr/local --default-library=static \
+    -Dcairo=enabled -Dopengl=disabled -Dvulkan=disabled \
+    -Dexamples=disabled -Dtests=disabled
+ninja -C build install
+```
+
+Then point `PKG_CONFIG_PATH` at the install prefix if you used a non-system
+one (for example `PKG_CONFIG_PATH=/home/you/local/lib/x86_64-linux-gnu/pkgconfig make`).
+
+The UI declares itself as `ui:X11UI`. Hosts that support X11 embedding
+(Ardour, Carla, Jalv, Qtractor, Zrythm, REAPER) will embed it directly;
+hosts that cannot embed fall back to the `ui:showInterface` to open the UI
+in its own top-level window.
 
 ## Test
 
@@ -69,10 +106,20 @@ After installing, the plugin appears in any LV2 host under the URI
 Qtractor, Zrythm, and Jalv. A few quick ways to try it:
 
 - `jalv gtk https://github.com/Rui-727/OTT` opens a basic control UI and
-  routes JACK audio through the plugin.
+  routes JACK audio through the plugin. If `ott_ui.so` is installed, use
+  `jalv.gtk https://github.com/Rui-727/OTT` to get the bundled graphical UI.
 - In Carla, add the plugin from the plugin browser (search "OTT") and wire
   audio on the patch canvas.
 - In Ardour, add OTT to a track as an inline or post-fader plugin.
+
+The bundled UI (when built) is a 560x360 fixed-size X11 window drawn with
+Cairo. It exposes 12 knobs (Depth, Time, In Gain, Out Gain, three band
+thresholds, three band gains, Upward, Downward) and a Bypass toggle.
+Left-drag a knob vertically to change its value, hold Shift for fine
+control, and double-click to reset to the default. The band columns are
+arranged HIGH / MID / LOW (left to right) to match the Xfer OTT visual;
+band indices in the DSP go low/mid/high, so the port ordering is reversed
+relative to the visual order.
 
 ## Parameters
 
