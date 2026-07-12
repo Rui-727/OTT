@@ -740,12 +740,17 @@ instantiate(const LV2UI_Descriptor *descriptor,
         return NULL;
     }
 
-    /* Only show the window ourselves when there's no parent (the host
-     * embeds the widget itself when one was provided). Hosts that drive
-     * the window via showInterface will call ui_show() themselves; for
-     * everyone else we have to make the window appear here. */
-    if (!parent) {
-        puglShow(ui->view, PUGL_SHOW_RAISE);
+    /* Always show the window on instantiate. When a parent is provided
+     * (embedded mode, e.g. Ardour/Carla), the host embeds the widget
+     * and puglShow is harmless. When no parent is provided (Reaper,
+     * jalv), the window must be shown explicitly or the user has to
+     * click "Show UI" twice: once to map, once to raise.
+     *
+     * Using PUGL_SHOW_FORCE_RAISE ensures the window appears and comes
+     * to the front on the first call. */
+    puglShow(ui->view, PUGL_SHOW_FORCE_RAISE);
+    if (ui->world) {
+        puglUpdate(ui->world, 0.0);
     }
 
     if (widget) {
