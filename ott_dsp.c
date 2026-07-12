@@ -221,10 +221,14 @@ static float gain_computer_down(float level_db, float T, float slope, float W) {
 }
 
 static float gain_computer_up(float level_db, float T, float slope, float W) {
-    /* Returns gain reduction in dB (<= 0, i.e. a boost). Soft knee. */
+    /* Returns gain reduction in dB (<= 0, i.e. a boost). Soft knee.
+     * No boost when the signal is more than 30 dB below threshold.
+     * This prevents the compressor from trying to boost silence or
+     * near-silence, which causes the muting-on-startup bug. */
     float undershoot = T - level_db;
+    if (undershoot <= 0.0f) return 0.0f;       /* signal at/above threshold: no boost */
+    if (undershoot > 30.0f) return 0.0f;        /* signal way below threshold: no boost */
     float knee_half = W * 0.5f;
-    if (undershoot <= -knee_half) return 0.0f;
     if (undershoot < knee_half) {
         float t = undershoot + knee_half;
         return -0.5f * slope * t * t / W;
@@ -297,11 +301,19 @@ void ott_dsp_reset(ott_dsp_t *ott) {
     lr4_reset(&ott->hp_low);
     lr4_reset(&ott->lp_mid);
     lr4_reset(&ott->hp_high);
+    /* Initialize RMS detector to the threshold level so silence at
+     * startup does not trigger massive upward compression. Without
+     * this, the RMS starts at 0 (-> -inf dB), the upward compressor
+     * sees a signal 200 dB below threshold and slams gain to max,
+     * which then causes the downward compressor to overreact when
+     * the first note arrives, creating a muting effect. */
+    float thresh_lin = db_to_lin(ott->params.band_thresh[0]);
+    float thresh_sq = thresh_lin * thresh_lin;
     for (int b = 0; b < 3; ++b) {
-        ott->band[b].rms_down_sq = 0.0f;
+        ott->band[b].rms_down_sq = thresh_sq;
         ott->band[b].env_down_ac = 0.0f;
         ott->band[b].env_down_ra = 0.0f;
-        ott->band[b].rms_up_sq   = 0.0f;
+        ott->band[b].rms_up_sq   = thresh_sq;
         ott->band[b].env_up_ac   = 0.0f;
         ott->band[b].env_up_ra   = 0.0f;
     }
