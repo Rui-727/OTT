@@ -452,7 +452,9 @@ on_expose(ott_ui_t *ui, const PuglExposeEvent *event)
     cairo_line_to(cr, 544.0, 270.5);
     cairo_stroke(cr);
 
-    cairo_destroy(cr);
+    /* Do NOT call cairo_destroy(cr) here. puglGetContext() returns a
+     * context owned by pugl. Destroying it causes a double-free
+     * assertion in cairo: "CAIRO_REFERENCE_COUNT_HAS_REFERENCE". */
 }
 
 /* ------------------------------------------------------------------ */
