@@ -41,9 +41,9 @@
 #define OTT_URI "https://github.com/Rui-727/OTT"
 #define OTT_UI_URI OTT_URI "#ui"
 
-/* Window geometry. Fixed. */
+/* Window geometry. Fixed. Matches the real Xfer OTT proportions. */
 #define OTT_UI_WIDTH  600
-#define OTT_UI_HEIGHT 400
+#define OTT_UI_HEIGHT 420
 
 /* Port indices. Must match ott_lv2.c and ott.ttl. */
 enum {
@@ -248,8 +248,6 @@ knob_radius(knob_size_t s)
 static void
 init_widgets(ott_ui_t *ui)
 {
-    /* Helper macros for readable table. Knob center is (X, Y); radius is
-     * derived from the size class so all large knobs share one radius. */
     #define KNOB(SZ, p, lbl, X, Y, MIN, MAX, DEF) \
         ui->widgets[ui_count++] = (ott_widget_t){ \
             W_KNOB, (SZ), (p), (lbl), (X), (Y), knob_radius(SZ), 0,0,0,0, \
@@ -261,36 +259,31 @@ init_widgets(ott_ui_t *ui)
 
     int ui_count = 0;
 
-    /* --- Top row: Depth, Time, Input Gain, Output Gain (4 large knobs) - */
-    /* 600px wide / 4 knobs = 150px per slot, centers at x = 75,225,375,525.
-     * cy = 70 so the 70px knob sits at y=35..105 with label/value below.   */
+    /* --- Top row: Depth, Time, In Gain, Out Gain (4 large knobs) ---
+     * Matches the real Xfer OTT top row. */
     KNOB(SIZE_LARGE, OTT_PORT_DEPTH,       "DEPTH",     75.0,  70.0, 0.0f, 1.0f, 1.0f);
     KNOB(SIZE_LARGE, OTT_PORT_TIME,        "TIME",     225.0,  70.0, 0.0f, 1.0f, 0.5f);
     KNOB(SIZE_LARGE, OTT_PORT_INPUT_GAIN,  "IN GAIN",  375.0,  70.0, -24.0f, 24.0f, 5.2f);
     KNOB(SIZE_LARGE, OTT_PORT_OUTPUT_GAIN, "OUT GAIN", 525.0,  70.0, -24.0f, 24.0f, 0.0f);
 
-    /* --- Middle: 3 columns. Visual order HIGH (left), MID (middle),
-     * LOW (right) to match the Xfer OTT layout. Band indexing in the DSP
-     * is band1=low, band2=mid, band3=high, so the port ordering looks
-     * reversed compared to the visual order. Each column has THRESHOLD
-     * and GAIN side by side. */
-    /* Column centers: 150, 300, 450. Knob offset +/- 35 from center.    */
-    /* cy = 210, r = 25 (SIZE_SMALL).                                    */
+    /* --- Bottom row: 3 columns of THRESHOLD + GAIN, then UPWARD/DOWNWARD ---
+     * This matches the real Xfer OTT where the band controls are below
+     * the meter section, not in the middle. Visual order HIGH (left),
+     * MID (center), LOW (right). */
     /* HIGH column (left): band3 ports. */
-    KNOB(SIZE_SMALL, OTT_PORT_BAND3_THRESH, "THRESHOLD", 115.0, 210.0, -60.0f, 0.0f, -30.0f);
-    KNOB(SIZE_SMALL, OTT_PORT_BAND3_GAIN,   "GAIN",      185.0, 210.0, -24.0f, 24.0f, 10.3f);
+    KNOB(SIZE_SMALL, OTT_PORT_BAND3_THRESH, "THRESH",  80.0, 340.0, -60.0f, 0.0f, -30.0f);
+    KNOB(SIZE_SMALL, OTT_PORT_BAND3_GAIN,   "GAIN",   150.0, 340.0, -24.0f, 24.0f, 10.3f);
     /* MID column (center): band2 ports. */
-    KNOB(SIZE_SMALL, OTT_PORT_BAND2_THRESH, "THRESHOLD", 265.0, 210.0, -60.0f, 0.0f, -30.0f);
-    KNOB(SIZE_SMALL, OTT_PORT_BAND2_GAIN,   "GAIN",      335.0, 210.0, -24.0f, 24.0f,  5.7f);
+    KNOB(SIZE_SMALL, OTT_PORT_BAND2_THRESH, "THRESH", 230.0, 340.0, -60.0f, 0.0f, -30.0f);
+    KNOB(SIZE_SMALL, OTT_PORT_BAND2_GAIN,   "GAIN",   300.0, 340.0, -24.0f, 24.0f,  5.7f);
     /* LOW column (right): band1 ports. */
-    KNOB(SIZE_SMALL, OTT_PORT_BAND1_THRESH, "THRESHOLD", 415.0, 210.0, -60.0f, 0.0f, -30.0f);
-    KNOB(SIZE_SMALL, OTT_PORT_BAND1_GAIN,   "GAIN",      485.0, 210.0, -24.0f, 24.0f, 10.3f);
+    KNOB(SIZE_SMALL, OTT_PORT_BAND1_THRESH, "THRESH", 380.0, 340.0, -60.0f, 0.0f, -30.0f);
+    KNOB(SIZE_SMALL, OTT_PORT_BAND1_GAIN,   "GAIN",   450.0, 340.0, -24.0f, 24.0f, 10.3f);
 
-    /* --- Bottom row: Upward, Downward, Bypass. -------------------------- */
-    /* Knobs at x=150 and x=300, bypass button centered at x=470. cy=325.  */
-    KNOB (SIZE_SMALL, OTT_PORT_UPWARD,   "UPWARD",   150.0, 325.0, 0.0f, 1.0f, 1.0f);
-    KNOB (SIZE_SMALL, OTT_PORT_DOWNWARD, "DOWNWARD", 300.0, 325.0, 0.0f, 1.0f, 1.0f);
-    TOGGLE(OTT_PORT_BYPASS,  "BYPASS",   430.0, 310.0, 100.0, 30.0, 0.0f);
+    /* --- Far right bottom: Upward, Downward, Bypass --- */
+    KNOB (SIZE_SMALL, OTT_PORT_UPWARD,   "UP",      520.0, 320.0, 0.0f, 1.0f, 1.0f);
+    KNOB (SIZE_SMALL, OTT_PORT_DOWNWARD, "DOWN",    520.0, 380.0, 0.0f, 1.0f, 1.0f);
+    TOGGLE(OTT_PORT_BYPASS,  "BYPASS",   430.0, 390.0, 70.0, 25.0, 0.0f);
 
     (void)ui_count;
     #undef KNOB
@@ -531,10 +524,68 @@ on_expose(ott_ui_t *ui, const PuglExposeEvent *event)
                            CAIRO_FONT_SLANT_NORMAL,
                            CAIRO_FONT_WEIGHT_NORMAL);
 
-    /* Band column captions: HIGH / MID / LOW above the threshold knobs. */
-    draw_band_label(cr, 150.0, 150.0, "HIGH");
-    draw_band_label(cr, 300.0, 150.0, "MID");
-    draw_band_label(cr, 450.0, 150.0, "LOW");
+    /* Separator below header. */
+    set_rgb(cr, C_SEP);
+    cairo_set_line_width(cr, 1.0);
+    cairo_move_to(cr, 0.0, 115.5);
+    cairo_line_to(cr, (double)OTT_UI_WIDTH, 115.5);
+    cairo_stroke(cr);
+
+    /* Meter section: dark green background with 3 horizontal meters.
+     * Placed between the top knobs and the bottom band knobs, matching
+     * the real Xfer OTT layout. Meters are static (0 dB) for now until
+     * the plugin gains meter output ports. */
+    set_rgb(cr, 0.102, 0.227, 0.102);  /* #1A3A1A dark green */
+    cairo_rectangle(cr, 10.0, 125.0, (double)OTT_UI_WIDTH - 20.0, 170.0);
+    cairo_fill(cr);
+
+    /* Meter labels: H, B, L on the left side of the meter section. */
+    set_rgb(cr, 1.0, 1.0, 1.0);  /* white */
+    cairo_select_font_face(cr, "sans-serif",
+                           CAIRO_FONT_SLANT_NORMAL,
+                           CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 11.0);
+    cairo_move_to(cr, 20.0, 160.0);
+    cairo_show_text(cr, "H");
+    cairo_move_to(cr, 20.0, 200.0);
+    cairo_show_text(cr, "B");
+    cairo_move_to(cr, 20.0, 240.0);
+    cairo_show_text(cr, "L");
+
+    /* Meter bars (static at 0 dB for now). */
+    cairo_select_font_face(cr, "sans-serif",
+                           CAIRO_FONT_SLANT_NORMAL,
+                           CAIRO_FONT_WEIGHT_NORMAL);
+    for (int m = 0; m < 3; m++) {
+        double my = 150.0 + m * 40.0;
+        /* Inactive track. */
+        set_rgb(cr, 0.067, 0.133, 0.067);  /* very dark green */
+        cairo_rectangle(cr, 40.0, my - 8.0, (double)OTT_UI_WIDTH - 100.0, 16.0);
+        cairo_fill(cr);
+        /* Active portion (cyan, static at ~50% for now). */
+        set_rgb(cr, 0.0, 0.804, 0.816);  /* #00CED0 cyan */
+        cairo_rectangle(cr, 40.0, my - 8.0, ((double)OTT_UI_WIDTH - 100.0) * 0.5, 16.0);
+        cairo_fill(cr);
+        /* Value text on the right. */
+        set_rgb(cr, 1.0, 1.0, 1.0);
+        cairo_set_font_size(cr, 10.0);
+        char valbuf[16];
+        snprintf(valbuf, sizeof(valbuf), "%+.1f dB", 0.0f);
+        cairo_move_to(cr, (double)OTT_UI_WIDTH - 50.0, my + 4.0);
+        cairo_show_text(cr, valbuf);
+    }
+
+    /* Separator below meter section. */
+    set_rgb(cr, C_SEP);
+    cairo_set_line_width(cr, 1.0);
+    cairo_move_to(cr, 0.0, 300.5);
+    cairo_line_to(cr, (double)OTT_UI_WIDTH, 300.5);
+    cairo_stroke(cr);
+
+    /* Band column labels above the bottom knobs. */
+    draw_band_label(cr, 115.0, 315.0, "HIGH");
+    draw_band_label(cr, 265.0, 315.0, "MID");
+    draw_band_label(cr, 415.0, 315.0, "LOW");
 
     /* Widgets. */
     for (int i = 0; i < OTT_WIDGET_COUNT; ++i) {
@@ -545,17 +596,6 @@ on_expose(ott_ui_t *ui, const PuglExposeEvent *event)
             draw_toggle(cr, w);
         }
     }
-
-    /* Subtle separator lines between the sections (1px, #333). The 0.5
-     * offset keeps the line crisp under Cairo's anti-aliasing. */
-    set_rgb(cr, C_SEP);
-    cairo_set_line_width(cr, 1.0);
-    cairo_move_to(cr, 16.0, 135.5);
-    cairo_line_to(cr, (double)OTT_UI_WIDTH - 16.0, 135.5);
-    cairo_stroke(cr);
-    cairo_move_to(cr, 16.0, 280.5);
-    cairo_line_to(cr, (double)OTT_UI_WIDTH - 16.0, 280.5);
-    cairo_stroke(cr);
 
     /* Credits footer. */
     set_rgb(cr, C_CREDITS);
