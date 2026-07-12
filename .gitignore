@@ -1,0 +1,5 @@
+# Build artifacts
+*.o
+*.so
+test_ott
+ott.lv2/
