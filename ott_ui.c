@@ -135,20 +135,21 @@ typedef struct {
 /* Theme                                                               */
 /* ------------------------------------------------------------------ */
 
-/* OTT "Xfer-style" dark theme, all colors as 0..1 doubles for Cairo. */
-#define C_BG          0.165, 0.165, 0.165   /* #2A2A2A panel background   */
-#define C_KNOB_OUTER  0.227, 0.227, 0.227   /* #3A3A3A knob body          */
-#define C_KNOB_INNER  0.133, 0.133, 0.133   /* #222222 knob center        */
-#define C_ARC_ACTIVE  1.000, 0.420, 0.208   /* #FF6B35 active arc         */
-#define C_ARC_TRACK   0.267, 0.267, 0.267   /* #444444 inactive arc       */
-#define C_POINTER     1.000, 1.000, 1.000   /* #FFFFFF value pointer      */
-#define C_LABEL       0.867, 0.867, 0.867   /* #DDDDDD knob labels        */
-#define C_VALUE       0.533, 0.533, 0.533   /* #888888 value text         */
-#define C_BAND        0.667, 0.667, 0.667   /* #AAAAAA band labels        */
-#define C_SEP         0.200, 0.200, 0.200   /* #333333 separator lines    */
-#define C_TITLE       1.000, 1.000, 1.000   /* white title                */
-#define C_SUBTITLE    0.533, 0.533, 0.533   /* dim subtitle               */
-#define C_CREDITS     0.333, 0.333, 0.333   /* #555555 credits            */
+/* OTT light theme matching the real Xfer OTT: light gray background,
+ * white knobs with black outlines, black text. */
+#define C_BG          0.820, 0.820, 0.820   /* #D1D1D1 light gray bg      */
+#define C_KNOB_OUTER  0.910, 0.910, 0.910   /* #E8E8E8 white knob body    */
+#define C_KNOB_INNER  0.780, 0.780, 0.780   /* #C7C7C7 knob center        */
+#define C_ARC_ACTIVE  0.200, 0.200, 0.200   /* #333333 dark active arc    */
+#define C_ARC_TRACK   0.600, 0.600, 0.600   /* #999999 light track        */
+#define C_POINTER     0.100, 0.100, 0.100   /* #1A1A1A black pointer      */
+#define C_LABEL       0.150, 0.150, 0.150   /* #262626 knob labels        */
+#define C_VALUE       0.350, 0.350, 0.350   /* #595959 value text         */
+#define C_BAND        0.200, 0.200, 0.200   /* #333333 band labels        */
+#define C_SEP         0.500, 0.500, 0.500   /* #808080 separator lines    */
+#define C_TITLE       0.100, 0.100, 0.100   /* near-black title           */
+#define C_SUBTITLE    0.400, 0.400, 0.400   /* dim subtitle               */
+#define C_CREDITS     0.450, 0.450, 0.450   /* credits                    */
 #define C_BYPASS_ON   0.000, 0.667, 0.000   /* #00AA00 green (ACTIVE)     */
 #define C_BYPASS_OFF  0.267, 0.000, 0.000   /* #440000 dark red (BYPASS)  */
 #define C_BUTTON_TEXT 1.000, 1.000, 1.000   /* white button text          */
@@ -280,8 +281,8 @@ init_widgets(ott_ui_t *ui)
     KNOB(SIZE_SMALL, OTT_PORT_UPWARD,   "UP",     370.0, 150.0, 0.0f, 1.0f, 1.0f);
     KNOB(SIZE_SMALL, OTT_PORT_DOWNWARD, "DOWN",   370.0, 220.0, 0.0f, 1.0f, 1.0f);
 
-    /* Bypass button at bottom right, not overlapping anything. */
-    TOGGLE(OTT_PORT_BYPASS,  "BYPASS",   310.0, 375.0, 90.0, 20.0, 0.0f);
+    /* Bypass button at bottom center, below the band knobs. */
+    TOGGLE(OTT_PORT_BYPASS,  "BYPASS",   165.0, 375.0, 90.0, 20.0, 0.0f);
 
     (void)ui_count;
     #undef KNOB
@@ -759,10 +760,10 @@ instantiate(const LV2UI_Descriptor *descriptor,
     }
 
     puglSetViewString(ui->view, PUGL_WINDOW_TITLE, "OTT - by Zero:Archive");
-    puglSetViewHint(ui->view, PUGL_RESIZABLE, PUGL_TRUE);
+    puglSetViewHint(ui->view, PUGL_RESIZABLE, PUGL_FALSE);
     puglSetSizeHint(ui->view, PUGL_DEFAULT_SIZE, OTT_UI_WIDTH, OTT_UI_HEIGHT);
     puglSetSizeHint(ui->view, PUGL_MIN_SIZE, OTT_UI_WIDTH, OTT_UI_HEIGHT);
-    puglSetSizeHint(ui->view, PUGL_MAX_SIZE, OTT_UI_WIDTH * 2, OTT_UI_HEIGHT * 2);
+    puglSetSizeHint(ui->view, PUGL_MAX_SIZE, OTT_UI_WIDTH, OTT_UI_HEIGHT);
     puglSetHandle(ui->view, ui);
     puglSetEventFunc(ui->view, on_event);
     puglSetBackend(ui->view, puglCairoBackend());
