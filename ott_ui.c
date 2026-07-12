@@ -2,11 +2,17 @@
  *
  * URI: https://github.com/Rui-727/OTT#ui
  *
- * The UI is a 560 x 360 fixed-size X11 window. It draws 12 knobs and a
- * bypass button with Cairo, and talks to the plugin exclusively through
- * the LV2 UI callback interface (write_function / port_event). The UI
- * and plugin never share memory beyond the host-mediated control port
- * buffers.
+ * The UI is a 600 x 400 fixed-size X11 window drawn with Cairo. The visual
+ * design echoes the Xfer Records OTT plugin: a dark gray panel with three
+ * rows of knobs (top: global controls; middle: per-band THRESHOLD/GAIN for
+ * HIGH/MID/LOW; bottom: UPWARD/DOWNWARD plus a bypass button). Each knob is
+ * drawn as a modern rotary: outer ring with a colored value arc sweeping
+ * 270 degrees, dark inner circle, and a white pointer. The window is
+ * branded "OTT" / "by Zero:Archive" with credits to the original.
+ *
+ * The UI talks to the plugin exclusively through the LV2 UI callback
+ * interface (write_function / port_event). It never shares memory with
+ * the plugin beyond the host-mediated control port buffers.
  *
  * Mouse:
  *   - Left-drag a knob vertically to change its value.
@@ -35,6 +41,10 @@
 #define OTT_URI "https://github.com/Rui-727/OTT"
 #define OTT_UI_URI OTT_URI "#ui"
 
+/* Window geometry. Fixed. */
+#define OTT_UI_WIDTH  600
+#define OTT_UI_HEIGHT 400
+
 /* Port indices. Must match ott_lv2.c and ott.ttl. */
 enum {
     OTT_PORT_DEPTH = 0,
@@ -62,6 +72,12 @@ typedef enum {
     W_TOGGLE
 } widget_type_t;
 
+/* Visual size class. Drives the knob radius and the label/value spacing. */
+typedef enum {
+    SIZE_LARGE,   /* top-row global knobs: 70px diameter (r=35)            */
+    SIZE_SMALL    /* per-band and bottom-row knobs: 50px diameter (r=25)   */
+} knob_size_t;
+
 /* Range descriptor for a parameter. min/max are in raw port units; for
  * W_TOGGLE both are 0/1 and the value is treated as a boolean. */
 typedef struct {
@@ -72,8 +88,9 @@ typedef struct {
 
 typedef struct {
     widget_type_t  type;
+    knob_size_t    size;       /* W_KNOB only                                    */
     uint32_t       port;       /* LV2 control port index                 */
-    const char    *label;      /* short label drawn above the widget     */
+    const char    *label;      /* short label drawn below the widget     */
     /* Geometry: knob uses (cx, cy, r); toggle uses (x, y, w, h).        */
     double         cx, cy;
     double         r;
@@ -113,6 +130,28 @@ typedef struct {
 
 /* Maximum gap (in seconds) between two clicks to count as a double-click. */
 #define OTT_DOUBLE_CLICK_S 0.40
+
+/* ------------------------------------------------------------------ */
+/* Theme                                                               */
+/* ------------------------------------------------------------------ */
+
+/* OTT "Xfer-style" dark theme, all colors as 0..1 doubles for Cairo. */
+#define C_BG          0.165, 0.165, 0.165   /* #2A2A2A panel background   */
+#define C_KNOB_OUTER  0.227, 0.227, 0.227   /* #3A3A3A knob body          */
+#define C_KNOB_INNER  0.133, 0.133, 0.133   /* #222222 knob center        */
+#define C_ARC_ACTIVE  1.000, 0.420, 0.208   /* #FF6B35 active arc         */
+#define C_ARC_TRACK   0.267, 0.267, 0.267   /* #444444 inactive arc       */
+#define C_POINTER     1.000, 1.000, 1.000   /* #FFFFFF value pointer      */
+#define C_LABEL       0.867, 0.867, 0.867   /* #DDDDDD knob labels        */
+#define C_VALUE       0.533, 0.533, 0.533   /* #888888 value text         */
+#define C_BAND        0.667, 0.667, 0.667   /* #AAAAAA band labels        */
+#define C_SEP         0.200, 0.200, 0.200   /* #333333 separator lines    */
+#define C_TITLE       1.000, 1.000, 1.000   /* white title                */
+#define C_SUBTITLE    0.533, 0.533, 0.533   /* dim subtitle               */
+#define C_CREDITS     0.333, 0.333, 0.333   /* #555555 credits            */
+#define C_BYPASS_ON   0.000, 0.667, 0.000   /* #00AA00 green (ACTIVE)     */
+#define C_BYPASS_OFF  0.267, 0.000, 0.000   /* #440000 dark red (BYPASS)  */
+#define C_BUTTON_TEXT 1.000, 1.000, 1.000   /* white button text          */
 
 /* ------------------------------------------------------------------ */
 /* Parameter helpers                                                   */
@@ -168,7 +207,7 @@ format_value(char *buf, size_t n, const ott_widget_t *w, float raw)
             snprintf(buf, n, "%+.1f dB", (double)raw);
             break;
         case OTT_PORT_BYPASS:
-            snprintf(buf, n, raw > 0.5f ? "BYPASS" : "ON");
+            snprintf(buf, n, raw > 0.5f ? "BYPASS" : "ACTIVE");
             break;
         default:
             snprintf(buf, n, "%.3f", (double)raw);
@@ -198,42 +237,60 @@ ui_touch(ott_ui_t *ui, uint32_t port, bool grabbed)
 /* Widget table and hit testing                                        */
 /* ------------------------------------------------------------------ */
 
+/* Knob radius by size class. SIZE_LARGE = 70px diameter (r=35),
+ * SIZE_SMALL = 50px diameter (r=25). */
+static double
+knob_radius(knob_size_t s)
+{
+    return s == SIZE_LARGE ? 35.0 : 25.0;
+}
+
 static void
 init_widgets(ott_ui_t *ui)
 {
-    /* Helper macros for readable table. */
-    #define KNOB(p, lbl, X, Y, R, MIN, MAX, DEF) \
+    /* Helper macros for readable table. Knob center is (X, Y); radius is
+     * derived from the size class so all large knobs share one radius. */
+    #define KNOB(SZ, p, lbl, X, Y, MIN, MAX, DEF) \
         ui->widgets[ui_count++] = (ott_widget_t){ \
-            W_KNOB, (p), (lbl), (X), (Y), (R), 0,0,0,0, \
+            W_KNOB, (SZ), (p), (lbl), (X), (Y), knob_radius(SZ), 0,0,0,0, \
             { (MIN), (MAX), (DEF) }, (DEF) }
     #define TOGGLE(p, lbl, X, Y, W, H, DEF) \
         ui->widgets[ui_count++] = (ott_widget_t){ \
-            W_TOGGLE, (p), (lbl), 0,0,0, (X), (Y), (W), (H), \
+            W_TOGGLE, SIZE_SMALL, (p), (lbl), 0,0,0, (X), (Y), (W), (H), \
             { 0.0f, 1.0f, (DEF) }, (DEF) }
 
     int ui_count = 0;
 
-    /* Top row: Depth, Time, Input Gain, Output Gain. */
-    KNOB(OTT_PORT_DEPTH,       "DEPTH",     80.0,  60.0, 26.0, 0.0f, 1.0f, 1.0f);
-    KNOB(OTT_PORT_TIME,        "TIME",     200.0,  60.0, 26.0, 0.0f, 1.0f, 0.5f);
-    KNOB(OTT_PORT_INPUT_GAIN,  "IN GAIN",  320.0,  60.0, 26.0, -24.0f, 24.0f, 5.2f);
-    KNOB(OTT_PORT_OUTPUT_GAIN, "OUT GAIN", 440.0,  60.0, 26.0, -24.0f, 24.0f, 0.0f);
+    /* --- Top row: Depth, Time, Input Gain, Output Gain (4 large knobs) - */
+    /* 600px wide / 4 knobs = 150px per slot, centers at x = 75,225,375,525.
+     * cy = 70 so the 70px knob sits at y=35..105 with label/value below.   */
+    KNOB(SIZE_LARGE, OTT_PORT_DEPTH,       "DEPTH",     75.0,  70.0, 0.0f, 1.0f, 1.0f);
+    KNOB(SIZE_LARGE, OTT_PORT_TIME,        "TIME",     225.0,  70.0, 0.0f, 1.0f, 0.5f);
+    KNOB(SIZE_LARGE, OTT_PORT_INPUT_GAIN,  "IN GAIN",  375.0,  70.0, -24.0f, 24.0f, 5.2f);
+    KNOB(SIZE_LARGE, OTT_PORT_OUTPUT_GAIN, "OUT GAIN", 525.0,  70.0, -24.0f, 24.0f, 0.0f);
 
-    /* Middle: 3 columns. Visual order is HIGH (left), MID (middle),
-     * LOW (right) to match the Xfer OTT layout. Band indexing in the
-     * DSP is band1=low, band2=mid, band3=high, so the port ordering
-     * looks reversed compared to the visual order. */
-    KNOB(OTT_PORT_BAND3_THRESH, "HIGH",    90.0, 140.0, 24.0, -60.0f, 0.0f, -30.0f);
-    KNOB(OTT_PORT_BAND3_GAIN,   "GAIN",    90.0, 220.0, 24.0, -24.0f, 24.0f, 10.3f);
-    KNOB(OTT_PORT_BAND2_THRESH, "MID",    280.0, 140.0, 24.0, -60.0f, 0.0f, -30.0f);
-    KNOB(OTT_PORT_BAND2_GAIN,   "GAIN",   280.0, 220.0, 24.0, -24.0f, 24.0f,  5.7f);
-    KNOB(OTT_PORT_BAND1_THRESH, "LOW",    470.0, 140.0, 24.0, -60.0f, 0.0f, -30.0f);
-    KNOB(OTT_PORT_BAND1_GAIN,   "GAIN",   470.0, 220.0, 24.0, -24.0f, 24.0f, 10.3f);
+    /* --- Middle: 3 columns. Visual order HIGH (left), MID (middle),
+     * LOW (right) to match the Xfer OTT layout. Band indexing in the DSP
+     * is band1=low, band2=mid, band3=high, so the port ordering looks
+     * reversed compared to the visual order. Each column has THRESHOLD
+     * and GAIN side by side. */
+    /* Column centers: 150, 300, 450. Knob offset +/- 35 from center.    */
+    /* cy = 210, r = 25 (SIZE_SMALL).                                    */
+    /* HIGH column (left): band3 ports. */
+    KNOB(SIZE_SMALL, OTT_PORT_BAND3_THRESH, "THRESHOLD", 115.0, 210.0, -60.0f, 0.0f, -30.0f);
+    KNOB(SIZE_SMALL, OTT_PORT_BAND3_GAIN,   "GAIN",      185.0, 210.0, -24.0f, 24.0f, 10.3f);
+    /* MID column (center): band2 ports. */
+    KNOB(SIZE_SMALL, OTT_PORT_BAND2_THRESH, "THRESHOLD", 265.0, 210.0, -60.0f, 0.0f, -30.0f);
+    KNOB(SIZE_SMALL, OTT_PORT_BAND2_GAIN,   "GAIN",      335.0, 210.0, -24.0f, 24.0f,  5.7f);
+    /* LOW column (right): band1 ports. */
+    KNOB(SIZE_SMALL, OTT_PORT_BAND1_THRESH, "THRESHOLD", 415.0, 210.0, -60.0f, 0.0f, -30.0f);
+    KNOB(SIZE_SMALL, OTT_PORT_BAND1_GAIN,   "GAIN",      485.0, 210.0, -24.0f, 24.0f, 10.3f);
 
-    /* Bottom row: Upward, Downward, Bypass. */
-    KNOB (OTT_PORT_UPWARD,   "UPWARD",   120.0, 320.0, 24.0, 0.0f, 1.0f, 1.0f);
-    KNOB (OTT_PORT_DOWNWARD, "DOWNWARD", 280.0, 320.0, 24.0, 0.0f, 1.0f, 1.0f);
-    TOGGLE(OTT_PORT_BYPASS,  "BYPASS",   420.0, 305.0, 110.0, 30.0, 0.0f);
+    /* --- Bottom row: Upward, Downward, Bypass. -------------------------- */
+    /* Knobs at x=150 and x=300, bypass button centered at x=470. cy=325.  */
+    KNOB (SIZE_SMALL, OTT_PORT_UPWARD,   "UPWARD",   150.0, 325.0, 0.0f, 1.0f, 1.0f);
+    KNOB (SIZE_SMALL, OTT_PORT_DOWNWARD, "DOWNWARD", 300.0, 325.0, 0.0f, 1.0f, 1.0f);
+    TOGGLE(OTT_PORT_BYPASS,  "BYPASS",   430.0, 310.0, 100.0, 30.0, 0.0f);
 
     (void)ui_count;
     #undef KNOB
@@ -268,34 +325,8 @@ widget_by_port(ott_ui_t *ui, uint32_t port)
 }
 
 /* ------------------------------------------------------------------ */
-/* Cairo drawing                                                       */
+/* Cairo drawing helpers                                               */
 /* ------------------------------------------------------------------ */
-
-/* OTT dark theme. Background #1a1a1a, text #cccccc, accent arc #FF6B6B. */
-#define COLOR_BG_R   0.102
-#define COLOR_BG_G   0.102
-#define COLOR_BG_B   0.102
-#define COLOR_FG_R   0.800
-#define COLOR_FG_G   0.800
-#define COLOR_FG_B   0.800
-#define COLOR_DIM_R  0.500
-#define COLOR_DIM_G  0.500
-#define COLOR_DIM_B  0.500
-#define COLOR_ACCENT_R 1.000
-#define COLOR_ACCENT_G 0.420
-#define COLOR_ACCENT_B 0.420
-#define COLOR_TRACK_R  0.333
-#define COLOR_TRACK_G  0.333
-#define COLOR_TRACK_B  0.333
-#define COLOR_POINTER_R 1.000
-#define COLOR_POINTER_G 1.000
-#define COLOR_POINTER_B 1.000
-#define COLOR_BYPASS_ON_R  0.900
-#define COLOR_BYPASS_ON_G  0.300
-#define COLOR_BYPASS_ON_B  0.200
-#define COLOR_BYPASS_OFF_R 0.200
-#define COLOR_BYPASS_OFF_G 0.450
-#define COLOR_BYPASS_OFF_B 0.200
 
 static void
 set_rgb(cairo_t *cr, double r, double g, double b)
@@ -313,6 +344,24 @@ show_text_centered(cairo_t *cr, double cx, double baseline, const char *s)
     cairo_show_text(cr, s);
 }
 
+/* Rounded rectangle path. Rounded corners with the given radius. */
+static void
+rounded_rect(cairo_t *cr, double x, double y, double w, double h, double r)
+{
+    if (r > w / 2.0) r = w / 2.0;
+    if (r > h / 2.0) r = h / 2.0;
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, x + w - r, y + r,     r, -M_PI / 2.0, 0.0);
+    cairo_arc(cr, x + w - r, y + h - r, r, 0.0,         M_PI / 2.0);
+    cairo_arc(cr, x + r,     y + h - r, r, M_PI / 2.0,  M_PI);
+    cairo_arc(cr, x + r,     y + r,     r, M_PI,        3.0 * M_PI / 2.0);
+    cairo_close_path(cr);
+}
+
+/* Draw a modern rotary knob. The arc sweeps 270 degrees from 7 o'clock
+ * (minimum) clockwise to 5 o'clock (maximum). The active portion is
+ * warm orange, the inactive portion is dark gray. A dark inner circle
+ * creates the ring look, and a white pointer indicates the value. */
 static void
 draw_knob(cairo_t *cr, const ott_widget_t *w)
 {
@@ -321,95 +370,148 @@ draw_knob(cairo_t *cr, const ott_widget_t *w)
     const double r  = w->r;
     const double v  = param_normalize(w, w->value);
 
-    /* Sweep 270 degrees, from 135 deg to 405 deg in standard math angles.
-     * Cairo angles are radians, 0 = east, positive = clockwise (Y down).
-     * Start = 135 deg = 3pi/4. End = 405 deg = 9pi/4. We express them
-     * as -3pi/4 .. 3pi/4 by drawing clockwise from bottom-left around
-     * the top to bottom-right. */
+    /* Arc sweep: 270 degrees, from 135 deg (bottom-left, "7 o'clock") to
+     * 405 deg (bottom-right, "5 o'clock"), going clockwise over the top.
+     * Cairo angles are radians with Y growing down, so positive angles
+     * go clockwise on screen; start=3pi/4 places us at lower-left.    */
     const double start = 0.75 * M_PI;     /* 135 deg, bottom-left        */
     const double end   = 2.25 * M_PI;     /* 405 deg, bottom-right       */
     const double sweep = end - start;     /* 1.5pi = 270 deg             */
     const double angle = start + v * sweep;
 
-    /* Background filled circle (knob body). */
-    set_rgb(cr, 0.11, 0.11, 0.13);
+    /* 1. Outer filled circle (knob body, #3A3A3A). */
+    set_rgb(cr, C_KNOB_OUTER);
     cairo_arc(cr, cx, cy, r, 0.0, 2.0 * M_PI);
     cairo_fill(cr);
 
-    /* Track ring (the full arc, dim). */
-    set_rgb(cr, COLOR_TRACK_R, COLOR_TRACK_G, COLOR_TRACK_B);
-    cairo_set_line_width(cr, 2.5);
-    cairo_arc(cr, cx, cy, r + 4.0, start, end);
-    cairo_stroke(cr);
-
-    /* Active arc (from start to current value). */
-    set_rgb(cr, COLOR_ACCENT_R, COLOR_ACCENT_G, COLOR_ACCENT_B);
-    cairo_set_line_width(cr, 3.0);
-    if (v > 0.001) {
-        cairo_arc(cr, cx, cy, r + 4.0, start, angle);
+    /* 2. Value arc ring around the outer edge. We draw at radius r - 3
+     * with a 4px line so the ring sits just inside the knob outline.
+     * Inactive (full sweep) first, then active portion on top. */
+    const double arc_r = r - 3.0;
+    if (arc_r > 2.0) {
+        /* Track (inactive portion: from current angle to end). */
+        set_rgb(cr, C_ARC_TRACK);
+        cairo_set_line_width(cr, 4.0);
+        cairo_set_line_cap(cr, CAIRO_LINE_CAP_BUTT);
+        cairo_arc(cr, cx, cy, arc_r, start, end);
         cairo_stroke(cr);
+
+        /* Active portion: from start to current angle. */
+        if (v > 0.001) {
+            set_rgb(cr, C_ARC_ACTIVE);
+            cairo_set_line_width(cr, 4.0);
+            cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+            cairo_arc(cr, cx, cy, arc_r, start, angle);
+            cairo_stroke(cr);
+        }
     }
 
-    /* Pointer line from center to the value position. */
-    set_rgb(cr, COLOR_POINTER_R, COLOR_POINTER_G, COLOR_POINTER_B);
+    /* 3. Inner filled circle (60% of outer diameter -> radius 0.6 * r),
+     * darker gray (#222) to create the "ring" look against the knob body. */
+    const double inner_r = 0.6 * r;
+    set_rgb(cr, C_KNOB_INNER);
+    cairo_arc(cr, cx, cy, inner_r, 0.0, 2.0 * M_PI);
+    cairo_fill(cr);
+
+    /* 4. Pointer / indicator: white line from the inner circle's edge to
+     * the inner edge of the arc ring, pointing at the current value. 2px. */
+    set_rgb(cr, C_POINTER);
     cairo_set_line_width(cr, 2.0);
-    cairo_move_to(cr, cx, cy);
-    cairo_line_to(cr, cx + (r - 2.0) * cos(angle),
-                      cy + (r - 2.0) * sin(angle));
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    const double p_inner = inner_r * 0.45;        /* start near center    */
+    const double p_outer = arc_r - 2.0;            /* stop just inside arc */
+    cairo_move_to(cr,
+                  cx + p_inner * cos(angle),
+                  cy + p_inner * sin(angle));
+    cairo_line_to(cr,
+                  cx + p_outer * cos(angle),
+                  cy + p_outer * sin(angle));
     cairo_stroke(cr);
 
-    /* Label above the knob. */
-    set_rgb(cr, COLOR_FG_R, COLOR_FG_G, COLOR_FG_B);
-    cairo_set_font_size(cr, 10.0);
-    show_text_centered(cr, cx, cy - r - 12.0, w->label);
+    /* Reset line cap for any subsequent draws. */
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_BUTT);
 
-    /* Value text below the knob, smaller and dimmer. */
+    /* 5. Label below the knob (#DDDDDD, 10pt). */
+    set_rgb(cr, C_LABEL);
+    cairo_set_font_size(cr, 10.0);
+    show_text_centered(cr, cx, cy + r + 15.0, w->label);
+
+    /* 6. Value text below the label (#888888, 9pt). */
     char buf[32];
     format_value(buf, sizeof(buf), w, w->value);
-    set_rgb(cr, COLOR_DIM_R, COLOR_DIM_G, COLOR_DIM_B);
+    set_rgb(cr, C_VALUE);
     cairo_set_font_size(cr, 9.0);
-    show_text_centered(cr, cx, cy + r + 16.0, buf);
+    show_text_centered(cr, cx, cy + r + 28.0, buf);
 }
 
+/* Draw the bypass button as a rounded rectangle. Green ("ACTIVE") when
+ * the plugin is processing audio (bypass port == 0); dark red ("BYPASS")
+ * when the signal is bypassed (bypass port == 1). */
 static void
 draw_toggle(cairo_t *cr, const ott_widget_t *w)
 {
-    const bool on = w->value > 0.5f;
+    /* In OTT's convention: bypass value 0 means the plugin is ACTIVE
+     * (audio is processed), value 1 means BYPASS (audio is passed through).
+     * The button text reflects the *current state*, not the action. */
+    const bool bypassed = w->value > 0.5f;
 
-    /* Body. Red when bypassed (on), dim green when active (off). */
-    if (on) {
-        set_rgb(cr, COLOR_BYPASS_ON_R, COLOR_BYPASS_ON_G, COLOR_BYPASS_ON_B);
+    if (bypassed) {
+        set_rgb(cr, C_BYPASS_OFF);
     } else {
-        set_rgb(cr, COLOR_BYPASS_OFF_R, COLOR_BYPASS_OFF_G, COLOR_BYPASS_OFF_B);
+        set_rgb(cr, C_BYPASS_ON);
     }
-    cairo_rectangle(cr, w->x, w->y, w->w, w->h);
+    rounded_rect(cr, w->x, w->y, w->w, w->h, 5.0);
     cairo_fill(cr);
 
-    /* Thin border. */
+    /* Thin darker border to lift the button off the panel. */
     set_rgb(cr, 0.0, 0.0, 0.0);
     cairo_set_line_width(cr, 1.0);
-    cairo_rectangle(cr, w->x + 0.5, w->y + 0.5, w->w - 1.0, w->h - 1.0);
+    rounded_rect(cr, w->x + 0.5, w->y + 0.5, w->w - 1.0, w->h - 1.0, 4.5);
     cairo_stroke(cr);
 
-    /* Label inside. */
-    set_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_set_font_size(cr, 12.0);
+    /* Button label inside. */
+    set_rgb(cr, C_BUTTON_TEXT);
+    cairo_set_font_size(cr, 11.0);
     show_text_centered(cr, w->x + w->w / 2.0,
                        w->y + w->h / 2.0 + 4.0,
-                       on ? "BYPASS" : "ACTIVE");
+                       bypassed ? "BYPASS" : "ACTIVE");
 
-    /* Caption above. */
-    set_rgb(cr, COLOR_FG_R, COLOR_FG_G, COLOR_FG_B);
+    /* Caption above the button. */
+    set_rgb(cr, C_LABEL);
     cairo_set_font_size(cr, 10.0);
     show_text_centered(cr, w->x + w->w / 2.0, w->y - 6.0, w->label);
 }
 
 static void
-draw_column_label(cairo_t *cr, double cx, double y, const char *s)
+draw_band_label(cairo_t *cr, double cx, double y, const char *s)
 {
-    set_rgb(cr, COLOR_FG_R, COLOR_FG_G, COLOR_FG_B);
+    set_rgb(cr, C_BAND);
     cairo_set_font_size(cr, 11.0);
     show_text_centered(cr, cx, y, s);
+}
+
+/* Draw the top-left header: "OTT" in bold white, "by Zero:Archive" in a
+ * smaller dim subtitle below. */
+static void
+draw_header(cairo_t *cr)
+{
+    /* "OTT" title, bold, 16pt. */
+    set_rgb(cr, C_TITLE);
+    cairo_select_font_face(cr, "sans-serif",
+                           CAIRO_FONT_SLANT_NORMAL,
+                           CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 16.0);
+    cairo_move_to(cr, 16.0, 20.0);
+    cairo_show_text(cr, "OTT");
+
+    /* "by Zero:Archive" subtitle, normal weight, 9pt, dim. */
+    set_rgb(cr, C_SUBTITLE);
+    cairo_select_font_face(cr, "sans-serif",
+                           CAIRO_FONT_SLANT_NORMAL,
+                           CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_set_font_size(cr, 9.0);
+    cairo_move_to(cr, 16.0, 32.0);
+    cairo_show_text(cr, "by Zero:Archive");
 }
 
 static void
@@ -419,18 +521,20 @@ on_expose(ott_ui_t *ui, const PuglExposeEvent *event)
     cairo_t *cr = (cairo_t *)puglGetContext(ui->view);
     if (!cr) return;
 
-    /* Background. */
-    set_rgb(cr, COLOR_BG_R, COLOR_BG_G, COLOR_BG_B);
+    /* Background panel. */
+    set_rgb(cr, C_BG);
     cairo_paint(cr);
 
+    /* Header (uses bold then resets to normal for the rest). */
+    draw_header(cr);
     cairo_select_font_face(cr, "sans-serif",
                            CAIRO_FONT_SLANT_NORMAL,
-                           CAIRO_FONT_WEIGHT_BOLD);
+                           CAIRO_FONT_WEIGHT_NORMAL);
 
     /* Band column captions: HIGH / MID / LOW above the threshold knobs. */
-    draw_column_label(cr,  90.0, 100.0, "HIGH");
-    draw_column_label(cr, 280.0, 100.0, "MID");
-    draw_column_label(cr, 470.0, 100.0, "LOW");
+    draw_band_label(cr, 150.0, 150.0, "HIGH");
+    draw_band_label(cr, 300.0, 150.0, "MID");
+    draw_band_label(cr, 450.0, 150.0, "LOW");
 
     /* Widgets. */
     for (int i = 0; i < OTT_WIDGET_COUNT; ++i) {
@@ -442,15 +546,26 @@ on_expose(ott_ui_t *ui, const PuglExposeEvent *event)
         }
     }
 
-    /* Subtle separator lines between the rows. */
-    set_rgb(cr, 0.18, 0.18, 0.18);
+    /* Subtle separator lines between the sections (1px, #333). The 0.5
+     * offset keeps the line crisp under Cairo's anti-aliasing. */
+    set_rgb(cr, C_SEP);
     cairo_set_line_width(cr, 1.0);
-    cairo_move_to(cr, 16.0, 90.5);
-    cairo_line_to(cr, 544.0, 90.5);
+    cairo_move_to(cr, 16.0, 135.5);
+    cairo_line_to(cr, (double)OTT_UI_WIDTH - 16.0, 135.5);
     cairo_stroke(cr);
-    cairo_move_to(cr, 16.0, 270.5);
-    cairo_line_to(cr, 544.0, 270.5);
+    cairo_move_to(cr, 16.0, 280.5);
+    cairo_line_to(cr, (double)OTT_UI_WIDTH - 16.0, 280.5);
     cairo_stroke(cr);
+
+    /* Credits footer. */
+    set_rgb(cr, C_CREDITS);
+    cairo_select_font_face(cr, "sans-serif",
+                           CAIRO_FONT_SLANT_NORMAL,
+                           CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_set_font_size(cr, 8.0);
+    show_text_centered(cr, (double)OTT_UI_WIDTH / 2.0,
+                       (double)OTT_UI_HEIGHT - 8.0,
+                       "Original OTT by Xfer Records. Linux port by Zero:Archive.");
 
     /* Do NOT call cairo_destroy(cr) here. puglGetContext() returns a
      * context owned by pugl. Destroying it causes a double-free
@@ -605,11 +720,11 @@ instantiate(const LV2UI_Descriptor *descriptor,
         return NULL;
     }
 
-    puglSetViewString(ui->view, PUGL_WINDOW_TITLE, "OTT");
+    puglSetViewString(ui->view, PUGL_WINDOW_TITLE, "OTT - by Zero:Archive");
     puglSetViewHint(ui->view, PUGL_RESIZABLE, PUGL_FALSE);
-    puglSetSizeHint(ui->view, PUGL_DEFAULT_SIZE, 560, 360);
-    puglSetSizeHint(ui->view, PUGL_MIN_SIZE, 560, 360);
-    puglSetSizeHint(ui->view, PUGL_MAX_SIZE, 560, 360);
+    puglSetSizeHint(ui->view, PUGL_DEFAULT_SIZE, OTT_UI_WIDTH, OTT_UI_HEIGHT);
+    puglSetSizeHint(ui->view, PUGL_MIN_SIZE, OTT_UI_WIDTH, OTT_UI_HEIGHT);
+    puglSetSizeHint(ui->view, PUGL_MAX_SIZE, OTT_UI_WIDTH, OTT_UI_HEIGHT);
     puglSetHandle(ui->view, ui);
     puglSetEventFunc(ui->view, on_event);
     puglSetBackend(ui->view, puglCairoBackend());
@@ -626,7 +741,9 @@ instantiate(const LV2UI_Descriptor *descriptor,
     }
 
     /* Only show the window ourselves when there's no parent (the host
-     * embeds the widget itself when one was provided). */
+     * embeds the widget itself when one was provided). Hosts that drive
+     * the window via showInterface will call ui_show() themselves; for
+     * everyone else we have to make the window appear here. */
     if (!parent) {
         puglShow(ui->view, PUGL_SHOW_RAISE);
     }
@@ -684,12 +801,26 @@ ui_idle(LV2UI_Handle handle)
     return 0;
 }
 
+/* Show the UI window. Hosts call this when the user clicks "Show UI"
+ * after previously hiding it (or after instantiate without a parent).
+ *
+ * We use PUGL_SHOW_FORCE_RAISE here instead of PUGL_SHOW_RAISE: the
+ * latter only raises an already-mapped window, so the first click after
+ * a hide sometimes just maps the window without bringing it to the
+ * front, forcing the user to click "Show UI" a second time. FORCE_RAISE
+ * always raises, which fixes the double-click issue. */
 static int
 ui_show(LV2UI_Handle handle)
 {
     ott_ui_t *ui = (ott_ui_t *)handle;
     if (ui && ui->view) {
-        puglShow(ui->view, PUGL_SHOW_RAISE);
+        puglShow(ui->view, PUGL_SHOW_FORCE_RAISE);
+        /* Pump the event loop once so the MapWindow + raise requests
+         * get flushed to the X server immediately, instead of waiting
+         * for the next idle tick. */
+        if (ui->world) {
+            puglUpdate(ui->world, 0.0);
+        }
     }
     return 0;
 }
