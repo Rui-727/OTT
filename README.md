@@ -66,19 +66,10 @@ ninja -C build install
 Then point `PKG_CONFIG_PATH` at the install prefix if you used a non-system
 one (for example `PKG_CONFIG_PATH=/home/you/local/lib/x86_64-linux-gnu/pkgconfig make`).
 
-The UI declares itself as `ui:X11UI` with `ui:fixedSize true`. Hosts that
-support X11 embedding (Ardour, Carla, Jalv, Qtractor, Zrythm, REAPER) will
-embed it directly; hosts that cannot embed fall back to the
-`ui:showInterface` to open the UI in its own top-level window.
-
-The UI is a fixed 580 x 440 pixel window with three rows of controls:
-DEPTH, TIME, IN, OUT across the top; three gain-reduction meters (H, B, L)
-in the middle; and per-band THRESH / GAIN pairs for HIGH, MID, LOW across
-the bottom, with an ACTIVE button centered below. Knobs are flat white
-circles with black outlines and black pointers, matching the Xfer OTT
-visual. The `upward` and `downward` ports are not exposed as widgets:
-they keep their default value (1.0) and can be adjusted through the
-host's generic parameter sheet if needed.
+The UI declares itself as `ui:X11UI`. Hosts that support X11 embedding
+(Ardour, Carla, Jalv, Qtractor, Zrythm, REAPER) will embed it directly;
+hosts that cannot embed fall back to the `ui:showInterface` to open the UI
+in its own top-level window.
 
 ## Test
 
@@ -121,8 +112,23 @@ Qtractor, Zrythm, and Jalv. A few quick ways to try it:
   audio on the patch canvas.
 - In Ardour, add OTT to a track as an inline or post-fader plugin.
 
-The bundled UI (when built) is a 560x360 fixed-size X11 window drawn with
-Cairo. It exposes 12 knobs (Depth, Time, In Gain, Out Gain, three band
+The bundled UI (when built) is a 420x480 fixed-size X11 window drawn with
+Cairo, styled after the real Xfer OTT's dark skin: a near-black panel,
+white/flat knobs with an amber/gold value ring (matching the OTT wordmark
+and the real plugin's knob look), and a black three-band level display
+with a green zone (downward compression) and an amber zone (upward
+compression) either side of a dark gap at the threshold. The white
+marker on each band's meter is live: it slides into the green or amber
+zone as the plugin's downward/upward compressors work on that band, and
+the dB readout next to each bar updates in real time too (driven by
+three new output control ports -- `band1_meter`, `band2_meter`,
+`band3_meter` -- described in Parameters below; the DSP core exposes
+this via `ott_dsp_get_band_meter()`). Layout mirrors the real plugin's
+grouping: DEPTH/TIME/IN/OUT across the top, the band display below that,
+per-band THRESHOLD/GAIN knobs underneath, and a final row of
+UPWARD/DOWNWARD knobs flanking a Bypass toggle at the bottom -- the same
+place Xfer puts them, below the band display rather than off to the side.
+It exposes 12 knobs (Depth, Time, In Gain, Out Gain, three band
 thresholds, three band gains, Upward, Downward) and a Bypass toggle.
 Left-drag a knob vertically to change its value, hold Shift for fine
 control, and double-click to reset to the default. The band columns are
@@ -151,6 +157,9 @@ relative to the visual order.
 | 14    | in_r            | In R              | audio         |         |
 | 15    | out_l           | Out L             | audio         |         |
 | 16    | out_r           | Out R             | audio         |         |
+| 17    | band1_meter     | Band 1 Meter (out)| dB, output    |         |
+| 18    | band2_meter     | Band 2 Meter (out)| dB, output    |         |
+| 19    | band3_meter     | Band 3 Meter (out)| dB, output    |         |
 
 - **Depth** is the wet/dry mix. 0 is the dry input, 1 is the fully processed
   signal. Low values (0.1 to 0.3) give a parallel-compression feel.
@@ -169,6 +178,13 @@ relative to the visual order.
   before the band sum.
 - **Bypass** routes the input directly to the output, bypassing all
   processing.
+- **Band N Meter** (output only) reports the net compression gain currently
+  applied to that band, in dB: positive means the downward compressor is
+  reducing the level, negative means the upward compressor is boosting it,
+  0 means the band is sitting at its threshold. This is what drives the
+  bundled UI's live level markers; hosts with a generic parameter sheet
+  will not show these three ports since they carry `lv2:portProperty
+  <...port-props#notOnGUI>`.
 
 ## License
 

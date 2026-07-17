@@ -64,6 +64,15 @@ void ott_dsp_process_stereo(ott_dsp_t *left, ott_dsp_t *right,
  * need to verify the crossover sums flat. bands[0]=low, [1]=mid, [2]=high. */
 void ott_dsp_crossover_split(ott_dsp_t *ott, float input, float bands[3]);
 
+/* Report the net compression gain currently applied to each band, in dB,
+ * from the most recently processed sample. bands[0]=low, [1]=mid, [2]=high,
+ * matching the order used throughout this header. Positive values mean net
+ * attenuation (downward compression is dominant); negative values mean a
+ * net boost (upward compression is dominant); 0 means the band is sitting
+ * at its threshold with neither compressor active. Intended for driving a
+ * UI meter, not for audio-rate use. */
+void ott_dsp_get_band_meter(ott_dsp_t *ott, float meter_db[3]);
+
 #ifdef __cplusplus
 }
 #endif

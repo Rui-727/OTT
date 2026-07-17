@@ -35,6 +35,9 @@ enum {
     OTT_PORT_IN_R,
     OTT_PORT_OUT_L,
     OTT_PORT_OUT_R,
+    OTT_PORT_BAND1_METER,   /* output, dB: net gain applied to the low band  */
+    OTT_PORT_BAND2_METER,   /* output, dB: net gain applied to the mid band  */
+    OTT_PORT_BAND3_METER,   /* output, dB: net gain applied to the high band */
     OTT_PORT_COUNT
 };
 
@@ -56,6 +59,12 @@ typedef struct {
     const float *in_r;
     float *out_l;
     float *out_r;
+
+    /* Output control ports: net gain applied per band on the last sample,
+     * in dB, for the UI's live meter display. */
+    float *band1_meter;
+    float *band2_meter;
+    float *band3_meter;
 
     ott_dsp_t *left;
     ott_dsp_t *right;
@@ -101,6 +110,9 @@ static void connect_port(LV2_Handle instance, uint32_t port, void *data) {
         case OTT_PORT_IN_R:         self->in_r          = (const float *)data; break;
         case OTT_PORT_OUT_L:        self->out_l         = (float *)data; break;
         case OTT_PORT_OUT_R:        self->out_r         = (float *)data; break;
+        case OTT_PORT_BAND1_METER:  self->band1_meter   = (float *)data; break;
+        case OTT_PORT_BAND2_METER:  self->band2_meter   = (float *)data; break;
+        case OTT_PORT_BAND3_METER:  self->band3_meter   = (float *)data; break;
         default: break;
     }
 }
@@ -164,6 +176,15 @@ static void run(LV2_Handle instance, uint32_t n_samples) {
             memcpy(self->out_r, self->out_l, n_samples * sizeof(float));
         }
     }
+
+    /* Publish the per-band meter for the UI. left->band_net_gr_db reflects
+     * the last sample processed above, whether that came from the stereo
+     * (linked) or mono path. bands[0]=low, [1]=mid, [2]=high. */
+    float meter[3];
+    ott_dsp_get_band_meter(self->left, meter);
+    if (self->band1_meter) *self->band1_meter = meter[0];
+    if (self->band2_meter) *self->band2_meter = meter[1];
+    if (self->band3_meter) *self->band3_meter = meter[2];
 }
 
 static void cleanup(LV2_Handle instance) {

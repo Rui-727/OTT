@@ -167,6 +167,13 @@ struct ott_dsp {
 
     band_state_t band[3];
 
+    /* Net compression gain applied to each band on the most recently
+     * processed sample, in dB (positive = attenuation, negative = boost).
+     * Updated by process_band_sample (mono) and the stereo loop. Read by
+     * ott_dsp_get_band_meter() for UI display; not used in the audio path
+     * itself. */
+    float band_net_gr_db[3];
+
     /* Cached derived parameters (recomputed on set_params). */
     float alpha_a;          /* attack coefficient */
     float alpha_r;          /* release coefficient */
@@ -316,6 +323,7 @@ void ott_dsp_reset(ott_dsp_t *ott) {
         ott->band[b].rms_up_sq   = thresh_sq;
         ott->band[b].env_up_ac   = 0.0f;
         ott->band[b].env_up_ra   = 0.0f;
+        ott->band_net_gr_db[b]   = 0.0f;
     }
 }
 
@@ -372,6 +380,13 @@ void ott_dsp_get_params(ott_dsp_t *ott, ott_params_t *out) {
     if (ott && out) *out = ott->params;
 }
 
+void ott_dsp_get_band_meter(ott_dsp_t *ott, float meter_db[3]) {
+    if (!ott || !meter_db) return;
+    for (int b = 0; b < 3; ++b) {
+        meter_db[b] = ott->band_net_gr_db[b];
+    }
+}
+
 /* ----------------------------------------------------------------------- */
 /* Per-sample processing core (shared by mono and stereo paths).           */
 /* ----------------------------------------------------------------------- */
@@ -387,7 +402,9 @@ static inline float process_band_sample(band_state_t *bs,
                                         float slope_up,
                                         float alpha_a,
                                         float alpha_r,
-                                        float alpha_rms) {
+                                        float alpha_rms,
+                                        float *out_gr_down,
+                                        float *out_gr_up) {
     /* Downward: RMS detector on input. */
     float sq_down = x * x;
     bs->rms_down_sq = alpha_rms * bs->rms_down_sq + (1.0f - alpha_rms) * sq_down;
@@ -417,6 +434,8 @@ static inline float process_band_sample(band_state_t *bs,
     float gain_up = clamp_gain(expf(-gr_up * (float)(M_LN10 / 20.0)));
     x *= gain_up;
     x = flush_denormal(x);
+    if (out_gr_down) *out_gr_down = gr_down;
+    if (out_gr_up)   *out_gr_up   = gr_up;
     return x;
 }
 
@@ -441,11 +460,14 @@ static float process_mono_sample(ott_dsp_t *ott, float input) {
     float band_in[3] = { low, mid, high };
     float wet = 0.0f;
     for (int b = 0; b < 3; ++b) {
+        float gr_down = 0.0f, gr_up = 0.0f;
         float y = process_band_sample(&ott->band[b], band_in[b],
                                       ott->params.band_thresh[b],
                                       ott->slope_down[b],
                                       ott->slope_up[b],
-                                      alpha_a, alpha_r, alpha_rms);
+                                      alpha_a, alpha_r, alpha_rms,
+                                      &gr_down, &gr_up);
+        ott->band_net_gr_db[b] = gr_down + gr_up;
         wet += y * ott->band_gain_lin[b];
     }
 
@@ -540,6 +562,8 @@ void ott_dsp_process_stereo(ott_dsp_t *left, ott_dsp_t *right,
         for (int b = 0; b < 3; ++b) {
             float x_l = bandL[b];
             float x_r = have_r ? bandR[b] : x_l;
+            float band_gr_down = 0.0f;
+            float band_gr_up = 0.0f;
 
             /* Downward: linked RMS detector. */
             float sq_l = x_l * x_l;
@@ -566,6 +590,7 @@ void ott_dsp_process_stereo(ott_dsp_t *left, ott_dsp_t *right,
                 right->band[b].env_down_ac = left->band[b].env_down_ac;
                 right->band[b].env_down_ra = left->band[b].env_down_ra;
                 gr = clamp_gr(gr);
+                band_gr_down = gr;
                 float gain = clamp_gain(expf(-gr * (float)(M_LN10 / 20.0)));
                 x_l *= gain; x_l = flush_denormal(x_l);
                 x_r *= gain; x_r = flush_denormal(x_r);
@@ -581,6 +606,7 @@ void ott_dsp_process_stereo(ott_dsp_t *left, ott_dsp_t *right,
                                                 &left->band[b].env_down_ra,
                                                 alpha_a, alpha_r);
                 gr = clamp_gr(gr);
+                band_gr_down = gr;
                 float gain = clamp_gain(expf(-gr * (float)(M_LN10 / 20.0)));
                 x_l *= gain; x_l = flush_denormal(x_l);
             }
@@ -608,6 +634,7 @@ void ott_dsp_process_stereo(ott_dsp_t *left, ott_dsp_t *right,
                 right->band[b].env_up_ac = left->band[b].env_up_ac;
                 right->band[b].env_up_ra = left->band[b].env_up_ra;
                 gr = clamp_gr(gr);
+                band_gr_up = gr;
                 float gain = clamp_gain(expf(-gr * (float)(M_LN10 / 20.0)));
                 x_l *= gain; x_l = flush_denormal(x_l);
                 x_r *= gain; x_r = flush_denormal(x_r);
@@ -623,9 +650,12 @@ void ott_dsp_process_stereo(ott_dsp_t *left, ott_dsp_t *right,
                                                 &left->band[b].env_up_ra,
                                                 alpha_a, alpha_r);
                 gr = clamp_gr(gr);
+                band_gr_up = gr;
                 float gain = clamp_gain(expf(-gr * (float)(M_LN10 / 20.0)));
                 x_l *= gain; x_l = flush_denormal(x_l);
             }
+
+            left->band_net_gr_db[b] = band_gr_down + band_gr_up;
 
             wetL += x_l * left->band_gain_lin[b];
             if (have_r) wetR += x_r * right->band_gain_lin[b];

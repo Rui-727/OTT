@@ -155,11 +155,42 @@
         lv2:index 16 ;
         lv2:symbol "out_r" ;
         lv2:name "Out R" ;
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 17 ;
+        lv2:symbol "band1_meter" ;
+        lv2:name "Band 1 Meter" ;
+        lv2:default 0.0 ;
+        lv2:minimum -24.0 ;
+        lv2:maximum 60.0 ;
+        lv2:portProperty <http://lv2plug.in/ns/ext/port-props#notOnGUI> ;
+        units:unit units:db ;
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 18 ;
+        lv2:symbol "band2_meter" ;
+        lv2:name "Band 2 Meter" ;
+        lv2:default 0.0 ;
+        lv2:minimum -24.0 ;
+        lv2:maximum 60.0 ;
+        lv2:portProperty <http://lv2plug.in/ns/ext/port-props#notOnGUI> ;
+        units:unit units:db ;
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 19 ;
+        lv2:symbol "band3_meter" ;
+        lv2:name "Band 3 Meter" ;
+        lv2:default 0.0 ;
+        lv2:minimum -24.0 ;
+        lv2:maximum 60.0 ;
+        lv2:portProperty <http://lv2plug.in/ns/ext/port-props#notOnGUI> ;
+        units:unit units:db ;
     ] .
 
 <https://github.com/Rui-727/OTT#ui>
     a ui:X11UI ;
     lv2:optionalFeature ui:idleInterface ,
+                        ui:resize ,
                         ui:touch ;
     lv2:extensionData ui:idleInterface ,
                       ui:showInterface ;
